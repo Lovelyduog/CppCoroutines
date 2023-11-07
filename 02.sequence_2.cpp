@@ -10,15 +10,18 @@
 struct Generator {
 
   class ExhaustedException : std::exception {};
-
+  // 首先构造promise_type
   struct promise_type {
     int value;
     bool is_ready = false;
 
+    // 挂起时返回一个等待体，等待体规定了协程执行的逻辑
     std::suspend_always initial_suspend() { return {}; };
 
+    // 销毁promise_type后调用 final_suspend,这两个函数主要作用是返回等待体
     std::suspend_always final_suspend() noexcept { return {}; }
 
+    // yield_value调用在initial_suspend 之前
     std::suspend_always yield_value(int value) {
       this->value = value;
       is_ready = true;
@@ -29,6 +32,7 @@ struct Generator {
 
     }
 
+    // 函数返回Generator， 使用std::coroutine_handle<promise_type>::from_promise从promise_type对象上获取handle初始化Generator
     Generator get_return_object() {
       return Generator{std::coroutine_handle<promise_type>::from_promise(*this)};
     }
@@ -39,6 +43,7 @@ struct Generator {
   std::coroutine_handle<promise_type> handle;
 
   bool has_next() {
+    // https://en.cppreference.com/w/cpp/coroutine/coroutine_handle/done
     if (handle.done()) {
       return false;
     }

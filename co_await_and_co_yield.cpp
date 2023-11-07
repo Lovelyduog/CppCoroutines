@@ -1,6 +1,4 @@
-//
-// Created by benny on 2022/1/31.
-//
+
 #define __cpp_lib_coroutine
 #include <coroutine>
 #include <exception>
@@ -24,6 +22,13 @@ struct Generator {
       is_ready = true;
       return {};
     }
+
+    std::suspend_always yield_value(int value) {
+      this->value = value;
+      is_ready = true;
+      return {};
+    }
+
 
     void unhandled_exception() {
 
@@ -70,7 +75,7 @@ struct Generator {
       : handle(handle) {}
 
   Generator(Generator &&generator) noexcept
-      : handle(std::exchange(generator.handle, {})) {}
+      : handle(generator.handle) {}
 
   Generator(Generator &) = delete;
   Generator &operator=(Generator &) = delete;
@@ -80,49 +85,28 @@ struct Generator {
   }
 };
 
-Generator sequence() {
-  int i = 0;
-  while (i < 5) {
-    co_await i++;
-  }
-}
-
-Generator returns_generator() {
-  auto g = sequence();
-  if (g.has_next()) {
-    std::cout << g.next() << std::endl;
-  }
-  return g;
-}
-
-// 怎么感觉co_await也可以直接当co_yield使用呢？
 Generator fibonacci() {
-  co_await 0;
-  co_await 1;
 
   int a = 0;
-  int b = 1;
   while (true) {
-    int c = a + b ;
-    co_await c;
-    b = a + b;
-    a = b - a;
+    co_await a++;
   }
 }
 
 
-int main() {
-  // auto generator = returns_generator();
-  auto generator = fibonacci();
-  for (int i = 0; i < 15; ++i) {
-    if (generator.has_next()) {
-      std::cout << generator.next() << std::endl;
-    } else {
-      break;
-    }
-  }
+Generator fibonacci2() {
 
-  return 0;
+  int a = 0;
+  while (true) {
+    co_yield a++;
+
+  }
 }
+
+// 汇报上看两者毫无区别
+/*co_yield expr等同于co_await promise.yield_value(expr)
+当promise_type定义了await_transform 后，两者从功能上来说一样，co_yield算是对co_await的封装
+*/ 
+
 
 
