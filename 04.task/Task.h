@@ -47,6 +47,7 @@ struct Task {
   explicit Task(std::coroutine_handle<promise_type> handle) noexcept: handle(handle) {}
 
   Task(Task &&task) noexcept: handle(std::exchange(task.handle, {})) {}
+  Task(){}
 
   Task(Task &) = delete;
 

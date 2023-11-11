@@ -10,7 +10,7 @@
 template<typename T>
 struct Result {
 
-  explicit Result() = default;
+  explicit Result() {};
 
   explicit Result(T &&value) : _value(value) {}
 

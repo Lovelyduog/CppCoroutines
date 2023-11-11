@@ -9,6 +9,7 @@
 #include <mutex>
 #include <list>
 #include <optional>
+#include <condition_variable>
 
 #include "coroutine_common.h"
 #include "Result.h"
@@ -19,17 +20,25 @@ class Task;
 
 template<typename ResultType>
 struct TaskPromise {
-  std::suspend_never initial_suspend() { return {}; }
+  // suspend_always 会有问题，他会一直
+  // std::suspend_never initial_suspend() { return {}; }
+  // TaskAwaiter<ResultType> initial_suspend() { return {}; }
+  // 这里必须返回一个awaitable
+  TaskAwaiter<ResultType> initial_suspend() { return TaskAwaiter<ResultType>(1); }
 
-  std::suspend_always final_suspend() noexcept { return {}; }
+  // 这个为nerver 会有问题
+  // TODO(leo) 完善区分机制
+  TaskAwaiter<ResultType> final_suspend() noexcept { return TaskAwaiter<ResultType>(2); }
 
   Task<ResultType> get_return_object() {
     return Task{std::coroutine_handle<TaskPromise>::from_promise(*this)};
   }
 
+  // 形式参数为co_await的对象 如果为1，则为int。如果时协程函数，则为协程；如果co_await后为等待体，则直接为等待体
+  // 这个在co_await时调用
   template<typename _ResultType>
   TaskAwaiter<_ResultType> await_transform(Task<_ResultType> &&task) {
-    return TaskAwaiter<_ResultType>(std::move(task));
+    return TaskAwaiter<_ResultType>(std::move(task)); //新标准是不是可以用exchange呢？
   }
 
   void unhandled_exception() {
