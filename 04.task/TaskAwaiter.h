@@ -19,7 +19,7 @@ struct TaskAwaiter {
   TaskAwaiter(TaskAwaiter &&completion) noexcept
       : task(std::exchange(completion.task, {})) {}
 
-  TaskAwaiter(int flag) {std::cout << "sadasd" << std::endl; is_null = flag;}
+  TaskAwaiter(int flag) { is_null = flag;}
 
 
   TaskAwaiter(TaskAwaiter &) = delete;

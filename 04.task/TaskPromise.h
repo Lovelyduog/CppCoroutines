@@ -28,7 +28,7 @@ struct TaskPromise {
 
   // 这个为nerver 会有问题
   // TODO(leo) 完善区分机制
-  TaskAwaiter<ResultType> final_suspend() noexcept { return TaskAwaiter<ResultType>(2); }
+  TaskAwaiter<ResultType> final_suspend() noexcept { return TaskAwaiter<ResultType>(1); }
 
   Task<ResultType> get_return_object() {
     return Task{std::coroutine_handle<TaskPromise>::from_promise(*this)};
