@@ -267,6 +267,70 @@ struct Awaiter3 {
   }
 };
 
+#include <vector>
+std::coroutine_handle<> g_coroutine_handle;
+
+
+struct Awaiter5 {
+  int value;
+
+  // return false 表示该协程创建出来后挂起
+  bool await_ready() {
+    // 返回值设置为true 我们发现Coroutine（）没有挂起没有sleep，直接顺序执行了
+    std::cout << "await_ready5" << std::endl;
+    return false;
+  }
+
+  // 协程体挂起后，将当前挂起点句柄传给一个线程，由该线程唤醒
+  void await_suspend(std::coroutine_handle<> coroutine_handle) {
+    std::cout << "await_suspend5" << std::endl;
+    g_coroutine_handle = coroutine_handle;
+  }
+
+  // 恢复后，会调用该函数将value 作为co_await单目运算符的返回值
+  int await_resume() {
+    std::cout << "await_resume5" << std::endl;
+    return value;
+  }
+};
+
+struct Awaiter6 {
+  int value;
+
+  // return false 表示该协程创建出来后挂起
+  bool await_ready() {
+    // 返回值设置为true 我们发现Coroutine（）没有挂起没有sleep，直接顺序执行了
+    std::cout << "await_ready6" << std::endl;
+    return false;
+    // return true; //如果return true  则不会进入到await_suspend，因此也不会恢复g_coroutine_handle
+  }
+
+  // 协程体挂起后，将当前挂起点句柄传给一个线程，由该线程唤醒
+  // std::coroutine_handle<> await_suspend(std::coroutine_handle<> coroutine_handle) {
+  //   std::cout << "await_suspend6" << std::endl;
+  //   if (g_coroutine_handle == nullptr)
+  //   {
+  //     std::cout << "g_coroutine_handle is null" << std::endl;
+  //   }
+    
+  //   return g_coroutine_handle;
+  // }
+
+  std::coroutine_handle<> await_suspend(std::coroutine_handle<> coroutine_handle) {
+    coroutine_handle.resume();
+    
+    return g_coroutine_handle;
+  }
+
+
+  // 恢复后，会调用该函数将value 作为co_await单目运算符的返回值
+  int await_resume() {
+    std::cout << "await_resume6" << std::endl;
+    return value;
+  }
+};
+
+
 
 // 只有在协程中才可以co_await 所以需要定义result携程
 Result Coroutine() {
@@ -289,6 +353,41 @@ Result Coroutine() {
   co_return;
 };
 
+// test await_supend return handle
+Result Coroutine2() {
+  std::cout << 1 << std::endl;
+  []()->Result{
+    std::cout << 1.5 << std::endl;
+    std::cout << co_await Awaiter5{.value = 999} << std::endl;
+
+  }();
+
+  std::cout << co_await Awaiter6{.value = 1000} << std::endl;
+  std::cout << 2 << std::endl;
+
+  std::cout << "===================" << std::endl;
+
+  sleep(12);
+  co_return;
+};
+
+// 测试恢复顺序
+Result Coroutine3() {
+  std::cout << 1 << std::endl;
+  []()->Result{
+    std::cout << 1.5 << std::endl;
+    std::cout << co_await Awaiter5{.value = 999} << std::endl;
+
+  }();
+
+  std::cout << co_await Awaiter6{.value = 1000} << std::endl;
+  std::cout << 2 << std::endl;
+
+
+  sleep(12);
+  co_return;
+};
+
 
 //Result Coroutine(int start_value) {
 //  std::cout << start_value << std::endl;
@@ -299,6 +398,8 @@ Result Coroutine() {
 //};
 
 int main() {
-  Coroutine();
+  // Coroutine();
+  // Coroutine2();
+  Coroutine3();
   return 0;
 }

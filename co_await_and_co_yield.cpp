@@ -107,6 +107,9 @@ Generator fibonacci2() {
 /*co_yield expr等同于co_await promise.yield_value(expr)
 当promise_type定义了await_transform 后，两者从功能上来说一样，co_yield算是对co_await的封装
 */ 
+int main(){
+  return 0;
+}
 
 
 
