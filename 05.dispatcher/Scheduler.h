@@ -18,12 +18,13 @@ class DelayedExecutable {
   DelayedExecutable(std::function<void()> &&func, long long delay) : func(std::move(func)) {
     using namespace std;
     using namespace std::chrono;
-    auto now = system_clock::now();
+    auto now = system_clock::now();//获取时间当前的时间戳
     auto current = duration_cast<milliseconds>(now.time_since_epoch()).count();
 
-    scheduled_time = current + delay;
+    scheduled_time = current + delay; //设置调度的时间
   }
 
+  // 获取延时的时间
   long long delay() const {
     using namespace std;
     using namespace std::chrono;
@@ -102,7 +103,7 @@ class Scheduler {
     is_active = false;
     if (wait_for_complete) {
       if (work_thread.joinable()) {
-        work_thread.join();
+        work_thread.join();//等待线程终止后销毁线程
       }
     } else {
       std::lock_guard lock(queue_lock);
@@ -110,7 +111,7 @@ class Scheduler {
       decltype(executable_queue) empty_queue;
       std::swap(executable_queue, empty_queue);
       if (work_thread.joinable()) {
-        work_thread.detach();
+        work_thread.detach();//立刻销毁线程
       }
     }
   }

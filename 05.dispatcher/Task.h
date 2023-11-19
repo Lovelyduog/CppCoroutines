@@ -46,17 +46,30 @@ struct Task {
 
   explicit Task(std::coroutine_handle<promise_type> handle) noexcept: handle(handle) {}
 
-  Task(Task &&task) noexcept: handle(std::exchange(task.handle, {})) {}
+  Task(Task &&task) noexcept: handle(std::exchange(task.handle, {})) {std::cout << " Task(Task &&task)" << std::endl;}
 
   Task(Task &) = delete;
 
   Task &operator=(Task &) = delete;
 
   ~Task() {
-    if (handle) handle.destroy();
+    std::cout << "~Task"  << std::endl;
+    // if (handle) handle.destroy();
+    //  https://stackoverflow.com/questions/68352718/is-it-necessary-to-call-destroy-on-a-stdcoroutine-handle 是否有必要手动销毁？
+    // 无需
+    // When the coroutine state is destroyed either because it terminated via co_return or uncaught exception, or because it was destroyed via its handle, it does the following:
+    // calls the destructor of the promise object.
+    // calls the destructors of the function parameter copies.
+    // calls operator delete to free the memory used by the coroutine state.
+    // transfers execution back to the caller/resumer
+    
+    //  handle.destroy()释放的是Task，而Task会在co_return后自行析构
+
   }
 
  private:
+  // https://stackoverflow.com/questions/68352718/is-it-necessary-to-call-destroy-on-a-stdcoroutine-handle
+  // https://en.cppreference.com/w/cpp/coroutine/coroutine_handle/destroy
   std::coroutine_handle<promise_type> handle;
 };
 
