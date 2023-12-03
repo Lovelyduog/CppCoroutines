@@ -14,12 +14,20 @@
 #include "Result.h"
 #include "DispatchAwaiter.h"
 #include "TaskAwaiter.h"
+#include <iostream>
 
 template<typename ResultType, typename Executor>
 class Task;
 
 template<typename ResultType, typename Executor>
 struct TaskPromise {
+  TaskPromise(){
+    std::cout << "TaskPromise" << std::endl;
+  }
+
+  ~TaskPromise(){
+    std::cout << "~TaskPromise" << std::endl;
+  }
   DispatchAwaiter initial_suspend() { return DispatchAwaiter{&executor}; }
 
   std::suspend_always final_suspend() noexcept { return {}; }

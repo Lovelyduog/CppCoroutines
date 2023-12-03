@@ -50,20 +50,20 @@ Task<int, LooperExecutor> simple_task() {
 void test_tasks() {
 
   // 我改写后的程序
-  simple_task().then([](int i) {
-    debug("simple task end: ", i);
-  }).catching([](std::exception &e) {
-    debug("error occurred", e.what());
-  }).then([](int i) {
-    debug("simple task end2: ", i);
-  });
-
-  // auto simpleTask = simple_task();
-  // simpleTask.then([](int i) {
+  // simple_task().then([](int i) {
   //   debug("simple task end: ", i);
   // }).catching([](std::exception &e) {
   //   debug("error occurred", e.what());
+  // }).then([](int i) {
+  //   debug("simple task end2: ", i);
   // });
+
+  auto simpleTask = simple_task();
+  simpleTask.then([](int i) {
+    debug("simple task end: ", i);
+  }).catching([](std::exception &e) {
+    debug("error occurred", e.what());
+  });
 
   sleep(10);
 //   try {

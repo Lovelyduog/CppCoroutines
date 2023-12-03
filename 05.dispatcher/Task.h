@@ -54,7 +54,7 @@ struct Task {
 
   ~Task() {
     std::cout << "~Task"  << std::endl;
-    // if (handle) handle.destroy();
+    if (handle) handle.destroy();
     //  https://stackoverflow.com/questions/68352718/is-it-necessary-to-call-destroy-on-a-stdcoroutine-handle 是否有必要手动销毁？
     // 无需
     // When the coroutine state is destroyed either because it terminated via co_return or uncaught exception, or because it was destroyed via its handle, it does the following:
