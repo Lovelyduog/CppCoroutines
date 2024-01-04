@@ -40,12 +40,15 @@ struct final_suspend_controler_awaiter
     // 可以返回任何值，只要支持到bool的隐式转换
     constexpr bool await_ready() const noexcept { return false; }
 
-    // 必须返回void  这里 保存coroutine_handle的把作用应该不是为了恢复
+    // 必须返回void  这里 保存coroutine_handle的把作用应该不是为了恢复。挂起的作用，是不是可以提高吞吐率？用户请求高发期，尽快相应请求，当用户请求少时，删除释放协程体，当然也可以加上限策略来删除。这里可以将handle移交给删除线程
     constexpr void await_suspend(std::coroutine_handle<>) const noexcept {}
 
     // 可以返回非void类型
     // 这里的返回类型应该是 MetaResult?是这里还是上面的？这里应该不是返回值的地方，地方，因为该处已经执行到co_return后面了
     // TODO(leo)如果挂起，这个函数是否有机会被调用？好像这个点不能够resume,会有未定义的错误发生
+    /*TODO（leo）initial_suspend 返回的协程可以调用resume，但是结果是未定义的？但是还是可以resume的，那是不是可以在这里await_resume里摧毁协程对象，
+    resume的存在，可以使initial_suspend_awaiter和final_suspend_controler_awaiter用同样的方式resume，但是执行两种不同的操作，前者await_resume 是返回值，后者是销毁协程对象
+    */
     constexpr void await_resume() const noexcept {} 
 };
 
