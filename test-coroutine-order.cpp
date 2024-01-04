@@ -4,6 +4,9 @@
 template <typename ReturnType>
 struct CoroutineTask;
 
+template<typename T>
+struct MetaResult;
+
 
 // 第一个目标：实现同时何以yield和await的协程：单线程版本的
 // normal 函数
@@ -23,19 +26,40 @@ struct initial_suspend_awaiter
     // TODO(leo) 普通携程，无异步逻辑，可以直接恢复
     constexpr void await_suspend(std::coroutine_handle<>) const noexcept {}
 
-    // 
+    // 这里的返回类型也应该是 MetaResult，ying'w
     constexpr void await_resume() const noexcept {}
 };
 
+// 这个是最终co_await返回
 // 该挂起的携程状态不能够resume
 struct final_suspend_controler_awaiter
 {
     // 挂起
+    // 可以返回任何值，只要支持到bool的隐式转换
     constexpr bool await_ready() const noexcept { return false; }
 
+    // 必须返回void
     constexpr void await_suspend(std::coroutine_handle<>) const noexcept {}
 
+    // 可以返回非void类型
+    // 这里的返回类型应该是 MetaResult?是这里还是上面的？
     constexpr void await_resume() const noexcept {}
+};
+
+// 可以支持下隐式转换
+// T 这个T应该是CoTask::return_type才对？
+template<typename T>
+struct MetaResult{
+
+    // 构造函数
+    MetaResult(T val) : value(val) {}
+
+    // 转换运算符，将MetaResult<T>隐式转换为T
+    operator T() const {
+        return value;
+    }
+
+    T value;
 };
 
 template<typename CoTask>
@@ -48,10 +72,13 @@ struct Promise
     // 销毁promise_type后调用 final_suspend,这两个函数主要作用是返回等待体
     std::suspend_always final_suspend() noexcept { return {}; }
 
-    // return_type 引用时传引用还是穿值
+    // return_type 引用时传引用还是穿值，这个应该不挂起？
+    // 这个需要是
     std::suspend_always yield_value(return_type value){
 
     }
+
+    void return_value(return_type )
 
     // TODO(leo)转换为awaitable
     // CoroutineTask 类型trait
@@ -73,7 +100,8 @@ struct CoroutineTask{
     // TODO(leo)支持迭代器遍历
     // TODO(leo)task调函数，往挂起中添加，如果时yield
     
-    // 需要对yield挂起点和co_await分开处理吗？
+    // 需要对yield挂起点和co_await分开处理，一个是迭代
+    // 如果想yield和co_await共存的话，挂起前可能需要知道yield是否为空，如果非空，则返回一个可迭代对象，或者一个结构体
 
     // 作为和promise沟通的纽带
     std::coroutine_handle<promise_type> handle_;
