@@ -26,24 +26,27 @@ struct initial_suspend_awaiter
     // TODO(leo) 普通携程，无异步逻辑，可以直接恢复
     constexpr void await_suspend(std::coroutine_handle<>) const noexcept {}
 
-    // 这里的返回类型也应该是 MetaResult，ying'w
+    // TODO(leo)initial_suspend_awaiter 和 final_suspend_controler_awaiter那个的await_resume应该返回MetaResult?? 我觉得应该是在这里
+    // 这里的返回类型也应该是
     constexpr void await_resume() const noexcept {}
 };
 
 // 这个是最终co_await返回
 // 该挂起的携程状态不能够resume
+// TODO(leo)final_suspend返回的final_suspend_controler_awaiter不会执行resume?????
 struct final_suspend_controler_awaiter
 {
     // 挂起
     // 可以返回任何值，只要支持到bool的隐式转换
     constexpr bool await_ready() const noexcept { return false; }
 
-    // 必须返回void
+    // 必须返回void  这里 保存coroutine_handle的把作用应该不是为了恢复
     constexpr void await_suspend(std::coroutine_handle<>) const noexcept {}
 
     // 可以返回非void类型
-    // 这里的返回类型应该是 MetaResult?是这里还是上面的？
-    constexpr void await_resume() const noexcept {}
+    // 这里的返回类型应该是 MetaResult?是这里还是上面的？这里应该不是返回值的地方，地方，因为该处已经执行到co_return后面了
+    // TODO(leo)如果挂起，这个函数是否有机会被调用？好像这个点不能够resume,会有未定义的错误发生
+    constexpr void await_resume() const noexcept {} 
 };
 
 // 可以支持下隐式转换
