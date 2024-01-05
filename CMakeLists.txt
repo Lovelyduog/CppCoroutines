@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.18)
 project(CppCoroutines)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -8,4 +8,5 @@ file(GLOB files "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 foreach(file ${files})
     get_filename_component(name ${file} NAME)
     add_executable(${name} ${file})
+    target_link_libraries(${name} PRIVATE pthread)
 endforeach()
