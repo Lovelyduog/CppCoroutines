@@ -65,6 +65,7 @@ struct MetaResult{
         return value;
     }
 
+    // Todo(leo) 支持迭代器
     T value;
 };
 
