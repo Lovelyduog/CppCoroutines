@@ -97,7 +97,6 @@ struct Promise
 
 };
 
-
 // TODO(leo)需要有个定义返回值类型的地方
 // return_type由这里指定吧
 template <typename ReturnType>
