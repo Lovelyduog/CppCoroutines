@@ -4,9 +4,6 @@
 template <typename ReturnType>
 struct CoroutineTask;
 
-template<typename T>
-struct MetaResult;
-
 
 // 第一个目标：实现同时何以yield和await的协程：单线程版本的
 // normal 函数
@@ -52,23 +49,6 @@ struct final_suspend_controler_awaiter
     constexpr void await_resume() const noexcept {} 
 };
 
-// 可以支持下隐式转换
-// T 这个T应该是CoTask::return_type才对？
-template<typename T>
-struct MetaResult{
-
-    // 构造函数
-    MetaResult(T val) : value(val) {}
-
-    // 转换运算符，将MetaResult<T>隐式转换为T
-    operator T() const {
-        return value;
-    }
-
-    // Todo(leo) 支持迭代器
-    T value;
-};
-
 template<typename CoTask>
 struct Promise
 {
@@ -92,9 +72,6 @@ struct Promise
     std::suspend_always await_transform(CoTask task){
 
     }
-
-    
-
 };
 
 // TODO(leo)需要有个定义返回值类型的地方

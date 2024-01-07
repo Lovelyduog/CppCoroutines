@@ -8,6 +8,7 @@ struct MetaBase
 {
     using result_type = std::conditional<IsIterable, std::vector<T>, T>::type;
     result_type data_;
+    // 如果需要保存异常的话，可以记录到这类，然后在拷贝赋值时抛出异常
 };
 
 template<typename T, bool IsIterable>
