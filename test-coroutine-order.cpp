@@ -1,6 +1,7 @@
 #include <coroutine>
 #include <future>
 #include <chrono>
+#include <iostream>
 
 // 前置类型声明
 template <typename ReturnType>
@@ -11,6 +12,7 @@ template <typename  CoTask>
 struct initial_suspend_awaiter
 {
     using return_type = typename CoTask::return_type;
+    using promise_type = typename CoTask::promise_type;
     // 是不是可以把task传递出来，把handle保存在Promise中
     initial_suspend_awaiter(){
     }
@@ -18,7 +20,7 @@ struct initial_suspend_awaiter
     constexpr bool await_ready() const noexcept { return false; }
     //  constexpr bool await_ready() const noexcept { return true; }
 
-    constexpr void await_suspend(std::coroutine_handle<return_type > h)  {
+    constexpr void await_suspend(std::coroutine_handle< > h)  {
         // std::async([=](){
         //     std::this_thread::sleep_for(std::chrono::seconds(2));
         //     h.resume();
@@ -27,9 +29,10 @@ struct initial_suspend_awaiter
     }
 
     CoTask::return_type await_resume() const noexcept { 
-        return h_.promise().value_;
+        // return h_.promise().value_;
+        return typename CoTask::return_type();
     }
-    std::coroutine_handle<return_type> h_;
+    std::coroutine_handle<> h_;
 };
 
 struct final_suspend_controler_awaiter
@@ -62,9 +65,9 @@ struct Promise
     }
 
     // 模板化，不然CoroutineTask<int>中没法co_awaitCoroutineTask<char> 
-    template<typename CoTask>
-    initial_suspend_awaiter<CoTask> await_transform(CoTask task){
-        return initial_suspend_awaiter<CoTask>();
+    template<typename CoTask2>
+    initial_suspend_awaiter<CoTask2> await_transform(CoTask2 task){
+        return initial_suspend_awaiter<CoTask2>();
     }
     return_type  value_;
 };
@@ -78,15 +81,22 @@ struct CoroutineTask{
 };
 
 CoroutineTask<int> second_coroutine(){
+    std::cout << "second_coroutine" << std::endl;
     co_return 1;
 }
-
 CoroutineTask<char> first_coroutine(){
-    co_await second_coroutine();
+    int a = co_await second_coroutine();
+    std::cout << a << std::endl;
     co_return 'b';
 }
 
+
+// CoroutineTask<int> first_coroutine(){
+//     co_await second_coroutine();
+//     co_return 'b';
+// }
+
 int main(){
-    first_coroutine();
+    // first_coroutine();
     getchar();
 }
