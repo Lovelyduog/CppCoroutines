@@ -14,73 +14,106 @@ struct initial_suspend_awaiter
     using return_type = typename CoTask::return_type;
     using promise_type = typename CoTask::promise_type;
     // 是不是可以把task传递出来，把handle保存在Promise中
-    initial_suspend_awaiter(){
+    initial_suspend_awaiter(return_type value){
+        value_ = value;
     }
 
+    template <typename U>
+    initial_suspend_awaiter(const initial_suspend_awaiter<U>& other) {
+        // 这里可以实现具体的类型转换逻辑
+        // 例如，如果 T 和 U 可以相互转换，可以在这里进行相应的转换
+        value_ = static_cast<return_type>(other.GetValue());
+    }
+
+    return_type GetValue(){
+        return value_;
+    }
     constexpr bool await_ready() const noexcept { return false; }
     //  constexpr bool await_ready() const noexcept { return true; }
 
-    constexpr void await_suspend(std::coroutine_handle<> &&h)  {
-        h_ = h;
+    constexpr void await_suspend(std::coroutine_handle<> h)  {
+        h.resume();
     //    std::async([=](){
-    //         std::this_thread::sleep_for(std::chrono::seconds(2));
-            h_.resume();
-        // });
+    //         std::this_thread::sleep_for(std::chrono::seconds(1));
+    //         h_.resume();
+    //     });
     }
 
-    CoTask::return_type await_resume() const noexcept { 
+    return_type await_resume() const noexcept { 
         //  std::cout << "Type of result: " << typeid(a).name() << std::endl;
         // return h_.promise().value_;
         // return typename CoTask::return_type();
-        std::coroutine_handle<promise_type> originalHandle = std::coroutine_handle<promise_type>::from_address(h_.address());
-        auto a = originalHandle.promise().value_;
-        auto b =  a.has_value();
-        std::cout << "Type of result: " << typeid(a).name() << std::endl;
-        std::cout << "has_value : " << b << std::endl;
+        // std::coroutine_handle<promise_type> originalHandle = std::coroutine_handle<promise_type>::from_address(h_.address());
+        // auto a = originalHandle.promise().value_;
+        // auto a =  h_.promise().value_;
+        // auto b =  h_.promise().value_;
+        // std::cout << "Type of result: " << typeid(a).name() << std::endl;
+        std::cout << "has value : " << value_ << std::endl;
+        return value_;
         //  std::cout << "has_value : " << a.value() << std::endl;  //这个为什么是null
+        // std::cout << "await_resume : " << h_.promise().value_ << std::endl;
         // return originalHandle.promise().value_.value_or( typename CoTask::return_type());
         // return task_.value_;
         // return 
     }
-
+    
     // CoTask &task_;
-    std::coroutine_handle<> h_;
+    return_type value_ = return_type();
 };
 
 struct final_suspend_controler_awaiter
 {
-    constexpr bool await_ready() const noexcept { return false; }
+    constexpr bool await_ready() const noexcept { return true; }
 
     constexpr void await_suspend(std::coroutine_handle<>) const noexcept {}
 
     constexpr void await_resume() const noexcept {} 
 };
 
-template<template <typename> typename CoTask1, typename ReturnType>
-struct Promise
+template <typename ReturnType>
+class promise_base{
+    virtual ReturnType get_value() = 0;
+};
+
+template<typename CoTask>
+struct Promise:promise_base< typename CoTask::return_type>
 {
-    using return_type  = ReturnType ;
-    using CoTask = CoTask1<ReturnType>;
+    using return_type  = typename CoTask::return_type ;
     // TODO（leo）暂时用 必然 挂起
-    initial_suspend_awaiter<CoTask> initial_suspend() { return initial_suspend_awaiter<CoTask>(); };
+    initial_suspend_awaiter<CoTask> initial_suspend() { return initial_suspend_awaiter<CoTask>(return_type()); };
  
     final_suspend_controler_awaiter final_suspend() noexcept { return {}; }
     void unhandled_exception(){}
-    CoTask get_return_object(){ return {}; }
+    CoTask get_return_object(){ 
+        std::cout << "get_return_object this :"  << this << std::endl;
+        CoTask task;
+        task.p_ = this;
+        // return {.p = this;}; 
+        return  task;
+    }
 
+    return_type get_value(){
+        return value_;
+    }
     // std::suspend_always yield_value(return_type value){
 
     // }
 
     void return_value(return_type value){
         value_ = value;
-        std::cout<< "return_value : " << value_.value() << std::endl;
+         std::cout<< "return_value " << value << std::endl;
+        // std::cout<< "return_value : " << value_.value() << std::endl;
     }
 
     // 模板化，不然CoroutineTask<int>中没法co_awaitCoroutineTask<char> 
+    // template<typename CoTask2>
+    // 其实是与promise 类型无关的，感觉还是重载运算符更好点
     template<typename CoTask2>
     initial_suspend_awaiter<CoTask2> await_transform(CoTask2 task){
-        return initial_suspend_awaiter<CoTask2>();
+        std::cout<< "await_transform " << (static_cast<typename CoTask2::promise_type *>(task.p_)->get_value()) << std::endl;
+        std::cout << "task promise address : " << task.p_ << std::endl;
+        std::cout << "this  : " << this << std::endl;
+        return initial_suspend_awaiter<CoTask2>(static_cast<typename CoTask2::promise_type *>(task.p_)->get_value());
     }
 
     // // template<typename CoTask2>
@@ -88,45 +121,83 @@ struct Promise
     //     return initial_suspend_awaiter<CoTask>();
     // }
     // return_type  value_;
-    std::optional<return_type> value_;
+    return_type value_;
 };
 
 template <typename ReturnType>
 struct CoroutineTask{
+    
     using return_type  = ReturnType;
-    using promise_type = Promise< CoroutineTask, ReturnType>;
-    std::coroutine_handle<promise_type> handle_;
+    using promise_type = Promise< CoroutineTask>;
+    template <typename U>
+    CoroutineTask(CoroutineTask<U> other) {
+        // 这里可以实现具体的类型转换逻辑
+        // 例如，如果 T 和 U 可以相互转换，可以在这里进行相应的转换
+        // p_ = static_cast<promise_base * >(other.GetPromise());
+        p_ = other.GetPromise();
+    }
+
+    CoroutineTask(){
+        p_ = nullptr;
+    }
+    void* GetPromise(){
+        return p_;
+    }
+
+    // std::coroutine_handle<promise_type> handle_;
+    void *p_ = nullptr;
     
 };
 
-template <typename ReturnType>
-struct CoroutineTask2{
-    using return_type  = ReturnType;
-    using promise_type = Promise< CoroutineTask, ReturnType>;
-    std::coroutine_handle<promise_type> handle_;
+// template <typename ReturnType>
+// struct CoroutineTaskDerived:public CoroutineTask{
+//     using return_type  = ReturnType;
+//     using promise_type = Promise< CoroutineTask, ReturnType>;
+//     std::coroutine_handle<promise_type> handle_;
     
-};
+// };
 
-CoroutineTask<int *> three_coroutine(){
-    std::cout << "three_coroutine" << std::endl;
-    co_return nullptr;
-}
 
-CoroutineTask<int> second_coroutine(){
+
+// template <typename ReturnType>
+// struct CoroutineTask2{
+//     using return_type  = ReturnType;
+//     using promise_type = Promise< CoroutineTask, ReturnType>;
+//     std::coroutine_handle<promise_type> handle_;
+    
+// };
+
+// CoroutineTask<int *> three_coroutine(){
+//     std::cout << "three_coroutine" << std::endl;
+//     co_return nullptr;
+// }
+
+CoroutineTask<double> third_coroutine(){
     // co_await three_coroutine();
-    std::cout << "second_coroutine" << std::endl;
-    co_return 1;
+    std::cout << "third_coroutine end" << std::endl;
+    co_return 99.12;
 }
-CoroutineTask2<char> first_coroutine(){
+
+
+CoroutineTask<u_int64_t> second_coroutine(){
+    double a = co_await third_coroutine();
+    std::cout << "co_await third_coroutine() : " << a << std::endl;
+    // std::cout << a << std::endl;
+    co_return 3;
+}
+
+
+CoroutineTask<char> first_coroutine(){
     int a = co_await second_coroutine();
-    std::cout << a << std::endl;
+    // double a = co_await third_coroutine();
+    std::cout << " co_await second_coroutine() : " <<  a << std::endl;
     co_return 'b';
 }
 
 
 // CoroutineTask<int> first_coroutine(){
 //     co_await second_coroutine();
-//     co_return 'b';
+//     co_return 2;
 // }
 
 int main(){
