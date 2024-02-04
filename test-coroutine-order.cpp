@@ -32,11 +32,12 @@ struct initial_suspend_awaiter
     //  constexpr bool await_ready() const noexcept { return true; }
 
     constexpr void await_suspend(std::coroutine_handle<> h)  {
-        h.resume();
-    //    std::async([=](){
-    //         std::this_thread::sleep_for(std::chrono::seconds(1));
-    //         h_.resume();
-    //     });
+        // h.resume();
+       std::async([=](){
+            //挂起当前线程模拟耗时草错 
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+            h.resume();
+        });
     }
 
     return_type await_resume() const noexcept { 
@@ -204,8 +205,16 @@ CoroutineTask<char> first_coroutine(){
 //     co_return 2;
 // }
 
+// TODO(shenglish) 这个为什么是有序的？
+int test_func(int i){
+    std::cout << "# main : " <<  i  << std::endl;
+    // 如果没有恢复，这里返回数据会不对
+    char a = first_coroutine();
+    std::cout << " main" << i << " :" <<  a << std::endl;
+}
+
 int main(){
-    // first_coroutine();
-    first_coroutine();
+    test_func(1);
+    test_func(2);
     getchar();
 }
