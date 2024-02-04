@@ -110,6 +110,7 @@ struct Promise:promise_base< typename CoTask::return_type>
     // 其实是与promise 类型无关的，感觉还是重载运算符更好点
     template<typename CoTask2>
     initial_suspend_awaiter<CoTask2> await_transform(CoTask2 task){
+        // 注意这个类型CoTask2 不是该promise对应的CoTask
         std::cout<< "await_transform " << (static_cast<typename CoTask2::promise_type *>(task.p_)->get_value()) << std::endl;
         std::cout << "task promise address : " << task.p_ << std::endl;
         std::cout << "this  : " << this << std::endl;
@@ -146,7 +147,9 @@ struct CoroutineTask{
 
     // std::coroutine_handle<promise_type> handle_;
     void *p_ = nullptr;
-    
+    operator ReturnType() const {
+        return static_cast<promise_type *>(p_)->get_value();
+    }
 };
 
 // template <typename ReturnType>
@@ -182,13 +185,14 @@ CoroutineTask<double> third_coroutine(){
 CoroutineTask<u_int64_t> second_coroutine(){
     double a = co_await third_coroutine();
     std::cout << "co_await third_coroutine() : " << a << std::endl;
-    // std::cout << a << std::endl;
     co_return 3;
 }
 
 
 CoroutineTask<char> first_coroutine(){
-    int a = co_await second_coroutine();
+    // int a = co_await second_coroutine();
+    int a = second_coroutine();
+    std::cout << "!!!!!!" << std::endl;
     // double a = co_await third_coroutine();
     std::cout << " co_await second_coroutine() : " <<  a << std::endl;
     co_return 'b';
