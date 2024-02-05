@@ -33,11 +33,12 @@ struct initial_suspend_awaiter
 
     constexpr void await_suspend(std::coroutine_handle<> h)  {
         // h.resume();
-    //    std::async([=](){
-    //         //挂起当前线程模拟耗时草错 
-    //         std::this_thread::sleep_for(std::chrono::seconds(3));
-    //         h.resume();
-    //     });
+        //    std::async([=](){
+        //         //挂起当前线程模拟耗时草错 
+        //         std::this_thread::sleep_for(std::chrono::seconds(3));
+        //         h.resume();
+        //     });
+        // TODO(shenglish)post到ioserveice中。怎么选ioserveice
     }
 
     return_type await_resume() const noexcept { 
@@ -130,6 +131,7 @@ struct Promise:promise_base< typename CoTask::return_type>
 // 当在其他线程上调用协程的resume()函数时，协程会在该线程上重新执行被挂起的代码块。这意味着协程的状态会被保存，并且可以在不同的线程间切换执行
 // https://stackoverflow.com/questions/75437328/is-it-safe-to-co-await-and-resume-a-coroutine-on-a-different-thread-without-sync
 // 是否可以给corouine分配一个线程id，后续挂起时都使用之前task的线程id，这样就可以从协程自身保证有序性？（普通协程）
+// 异步执行操作？在i线程中完成后，放回原线程中进行resume ？无锁队列？记录初始线程id？或者ioserviceid?异步池完成操作后放回原来的ioservice中
 
 //TODO(shenlish) 偏特化CoroutineTask<>作为返回值类型为void，可以static_assert来避免使用时用接无返回值的情况
 template <typename ReturnType>
@@ -219,6 +221,8 @@ int test_func(int i){
     std::cout << " main" << i << " :" <<  a << std::endl;
 }
 
+
+// todo(shenglish)使用包装boost异步io write read
 int main(){
     test_func(1);
     test_func(2);
