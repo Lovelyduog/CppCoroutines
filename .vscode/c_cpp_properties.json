@@ -4,7 +4,9 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "/opt/env/**"
+                "/opt/env/**",
+                "/home/huangruiguo/workspace/project_zero/server/external/include/boost/**",
+                "/home/huangruiguo/workspace/project_zero/server/external/include/**"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/g++",

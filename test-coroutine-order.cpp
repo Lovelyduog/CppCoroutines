@@ -33,11 +33,11 @@ struct initial_suspend_awaiter
 
     constexpr void await_suspend(std::coroutine_handle<> h)  {
         // h.resume();
-        //    std::async([=](){
-        //         //挂起当前线程模拟耗时草错 
-        //         std::this_thread::sleep_for(std::chrono::seconds(3));
-        //         h.resume();
-        //     });
+           std::async([=](){
+                //挂起当前线程模拟耗时操作
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                h.resume();
+            });
         // TODO(shenglish)post到ioserveice中。怎么选ioserveice
     }
 
