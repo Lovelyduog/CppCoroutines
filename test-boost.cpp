@@ -36,7 +36,10 @@ int main()
             }
         });
 
+        // 协程主要包装客户端的网络请求
         // 异步读取数据
+        //TODO（shenglish）包装wirte 和read
+        // 以及客户端的connect close按照python的方式
         boost::asio::streambuf receiveBuffer;
         boost::asio::async_read(socket, receiveBuffer, handleRead);
 

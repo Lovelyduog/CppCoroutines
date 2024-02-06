@@ -61,6 +61,7 @@
         "any": "cpp",
         "forward_list": "cpp",
         "fstream": "cpp",
-        "cinttypes": "cpp"
+        "cinttypes": "cpp",
+        "*.ipp": "cpp"
     }
 }
