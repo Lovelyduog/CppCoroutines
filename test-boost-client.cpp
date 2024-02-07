@@ -19,7 +19,7 @@ void connect_handler(const boost::system::error_code &ec)
  
 		char data[512] = "";
 		size_t len = socketPtr->read_some(boost::asio::buffer(data));// 阻塞
-		printf(data);
+		printf("%s\n", data);
 	}
 }
  
