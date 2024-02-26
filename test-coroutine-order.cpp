@@ -8,11 +8,10 @@ template <typename ReturnType>
 struct CoroutineTask;
 
 
-template <typename  CoTask>
+template <typename  ReturnType>
 struct initial_suspend_awaiter
 {
-    using return_type = typename CoTask::return_type;
-    using promise_type = typename CoTask::promise_type;
+    using return_type = ReturnType;
     // 是不是可以把task传递出来，把handle保存在Promise中
     initial_suspend_awaiter(return_type value){
         value_ = value;
@@ -82,7 +81,7 @@ struct Promise:promise_base< typename CoTask::return_type>
 {
     using return_type  = typename CoTask::return_type ;
     // TODO（leo）暂时用 必然 挂起
-    initial_suspend_awaiter<CoTask> initial_suspend() { return initial_suspend_awaiter<CoTask>(return_type()); };
+    initial_suspend_awaiter<return_type> initial_suspend() { return initial_suspend_awaiter<return_type>(return_type()); };
  
     final_suspend_controler_awaiter final_suspend() noexcept { return {}; }
     void unhandled_exception(){}
@@ -111,12 +110,12 @@ struct Promise:promise_base< typename CoTask::return_type>
     // template<typename CoTask2>
     // 其实是与promise 类型无关的，感觉还是重载运算符更好点
     template<typename CoTask2>
-    initial_suspend_awaiter<CoTask2> await_transform(CoTask2 task){
+    initial_suspend_awaiter< typename CoTask2::return_type > await_transform(CoTask2 task){
         // 注意这个类型CoTask2 不是该promise对应的CoTask
         std::cout<< "await_transform " << (static_cast<typename CoTask2::promise_type *>(task.p_)->get_value()) << std::endl;
         std::cout << "task promise address : " << task.p_ << std::endl;
         std::cout << "this  : " << this << std::endl;
-        return initial_suspend_awaiter<CoTask2>(static_cast<typename CoTask2::promise_type *>(task.p_)->get_value());
+        return initial_suspend_awaiter<typename CoTask2::return_type>(static_cast<typename CoTask2::promise_type *>(task.p_)->get_value());
     }
 
     // // template<typename CoTask2>
