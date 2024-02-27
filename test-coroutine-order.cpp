@@ -3,12 +3,51 @@
 #include <chrono>
 #include <iostream>
 #include <optional>
+#include <vector>
+
 // 前置类型声明
 template <typename ReturnType>
 struct CoroutineTask;
 
 
-template <typename  ReturnType>
+enum class EnumSuspendStrategy:uint32_t{
+    CommonSuspend ,
+    SuspendOnOtherThread
+};
+
+// Todo(leo)定义一个消息队列，由其他线程消费
+std::vector<std::coroutine_handle<> > work_queue;
+// 恢复，用户线程处理
+std::vector<std::coroutine_handle<> > resume_queue;
+
+// 策略模式
+template <enum EnumSuspendStrategy>
+struct  SuspendStrategy;
+
+
+template <>
+struct  SuspendStrategy<EnumSuspendStrategy::CommonSuspend>
+{
+    SuspendStrategy(std::coroutine_handle<> h){
+        h.resume();
+    }
+};
+
+
+template <>
+struct  SuspendStrategy<EnumSuspendStrategy::SuspendOnOtherThread>
+{
+    SuspendStrategy(std::coroutine_handle<> h){
+        work_queue.push_back(h);
+    }
+};
+
+
+
+
+
+
+template <typename  ReturnType, typename SuspendStrategy = SuspendStrategy<EnumSuspendStrategy::CommonSuspend> >
 struct initial_suspend_awaiter
 {
     using return_type = ReturnType;
@@ -24,6 +63,11 @@ struct initial_suspend_awaiter
         value_ = static_cast<return_type>(other.GetValue());
     }
 
+    initial_suspend_awaiter(const initial_suspend_awaiter& other) {
+        value_ = other.GetValue();
+    }
+
+
     return_type GetValue(){
         return value_;
     }
@@ -31,13 +75,13 @@ struct initial_suspend_awaiter
     //  constexpr bool await_ready() const noexcept { return true; }
 
     constexpr void await_suspend(std::coroutine_handle<> h)  {
+        SuspendStrategy do_supend(h);
         // h.resume();
-           std::async([=](){
-                //挂起当前线程模拟耗时操作
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-                h.resume();
-            });
-        // TODO(shenglish)post到ioserveice中。怎么选ioserveice
+        //    std::async([=](){
+        //         //挂起当前线程模拟耗时操作
+        //         std::this_thread::sleep_for(std::chrono::seconds(1));
+        //         h.resume();
+        //     });
     }
 
     return_type await_resume() const noexcept { 
@@ -70,6 +114,46 @@ struct final_suspend_controler_awaiter
 
     constexpr void await_resume() const noexcept {} 
 };
+
+// template <typename  ReturnType>
+// struct initial_suspend_awaiter< ReturnType,AwaiterType::EnumCommonAwaiter>
+// {
+//     using return_type = ReturnType;
+//     initial_suspend_awaiter(return_type value){
+//         value_ = value;
+//     }
+
+//     template <typename U>
+//     initial_suspend_awaiter(const initial_suspend_awaiter<U>& other) {
+//         value_ = static_cast<return_type>(other.GetValue());
+//     }
+
+//     initial_suspend_awaiter(const initial_suspend_awaiter& other) {
+//         value_ = other.GetValue();
+//     }
+
+//     return_type GetValue(){
+//         return value_;
+//     }
+//     constexpr bool await_ready() const noexcept { return false; }
+
+//     constexpr void await_suspend(std::coroutine_handle<> h)  {
+//            std::async([=](){
+//                 //挂起当前线程模拟耗时操作
+//                 std::this_thread::sleep_for(std::chrono::seconds(1));
+//                 h.resume();
+//             });
+//     }
+
+//     return_type await_resume() const noexcept { 
+//         std::cout << "has value : " << value_ << std::endl;
+//         return value_;
+//     }
+    
+//     return_type value_ = return_type();
+// };
+
+
 
 template <typename ReturnType>
 class promise_base{
