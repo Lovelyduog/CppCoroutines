@@ -12,18 +12,24 @@ struct CoroutineTask;
 
 enum class EnumSuspendStrategy:uint32_t{
     CommonSuspend ,
-    SuspendOnOtherThread
+    OtherThreadSuspend,
+    FinishSuspend
 };
 
 // Todo(leo)定义一个消息队列，由其他线程消费
 std::vector<std::coroutine_handle<> > work_queue;
 // 恢复，用户线程处理
 std::vector<std::coroutine_handle<> > resume_queue;
+// destory queue 可以让协程的销毁交给其他线程，提高主线程处理效率
+std::vector<std::coroutine_handle<> > destory_queue;
 
 // 策略模式
 template <enum EnumSuspendStrategy>
 struct  SuspendStrategy;
 
+using CommonSuspendStrategy = SuspendStrategy<EnumSuspendStrategy::CommonSuspend>;
+using OtherThreadSuspendStrategy = SuspendStrategy<EnumSuspendStrategy::OtherThreadSuspend>;
+using FinishSuspendStrategy = SuspendStrategy<EnumSuspendStrategy::FinishSuspend>;
 
 template <>
 struct  SuspendStrategy<EnumSuspendStrategy::CommonSuspend>
@@ -35,7 +41,7 @@ struct  SuspendStrategy<EnumSuspendStrategy::CommonSuspend>
 
 
 template <>
-struct  SuspendStrategy<EnumSuspendStrategy::SuspendOnOtherThread>
+struct  SuspendStrategy<EnumSuspendStrategy::OtherThreadSuspend>
 {
     SuspendStrategy(std::coroutine_handle<> h){
         work_queue.push_back(h);
@@ -43,27 +49,35 @@ struct  SuspendStrategy<EnumSuspendStrategy::SuspendOnOtherThread>
 };
 
 
-
-
+template <>
+struct  SuspendStrategy<EnumSuspendStrategy::FinishSuspend>
+{
+    //TODO(leo) 确认下执行完挂起，可以用什么检测到？
+    SuspendStrategy(std::coroutine_handle<> h){
+        // TODO(leo) 写代码测试下是否对主线程效率有帮助
+        // destory_queue.push_back(h); 
+        h.destroy();
+    }
+};
 
 
 template <typename  ReturnType, typename SuspendStrategy = SuspendStrategy<EnumSuspendStrategy::CommonSuspend> >
-struct initial_suspend_awaiter
+struct suspend_awaiter
 {
     using return_type = ReturnType;
     // 是不是可以把task传递出来，把handle保存在Promise中
-    initial_suspend_awaiter(return_type value){
+    suspend_awaiter(return_type value){
         value_ = value;
     }
 
     template <typename U>
-    initial_suspend_awaiter(const initial_suspend_awaiter<U>& other) {
+    suspend_awaiter(const suspend_awaiter<U>& other) {
         // 这里可以实现具体的类型转换逻辑
         // 例如，如果 T 和 U 可以相互转换，可以在这里进行相应的转换
         value_ = static_cast<return_type>(other.GetValue());
     }
 
-    initial_suspend_awaiter(const initial_suspend_awaiter& other) {
+    suspend_awaiter(const suspend_awaiter& other) {
         value_ = other.GetValue();
     }
 
@@ -71,6 +85,8 @@ struct initial_suspend_awaiter
     return_type GetValue(){
         return value_;
     }
+    // TODO(leo) 参考boost库中 实现方式 的initail时await_ready返回true，不挂起
+    // include/boost/outcome/detail/coroutine_support.ipp
     constexpr bool await_ready() const noexcept { return false; }
     //  constexpr bool await_ready() const noexcept { return true; }
 
@@ -115,46 +131,6 @@ struct final_suspend_controler_awaiter
     constexpr void await_resume() const noexcept {} 
 };
 
-// template <typename  ReturnType>
-// struct initial_suspend_awaiter< ReturnType,AwaiterType::EnumCommonAwaiter>
-// {
-//     using return_type = ReturnType;
-//     initial_suspend_awaiter(return_type value){
-//         value_ = value;
-//     }
-
-//     template <typename U>
-//     initial_suspend_awaiter(const initial_suspend_awaiter<U>& other) {
-//         value_ = static_cast<return_type>(other.GetValue());
-//     }
-
-//     initial_suspend_awaiter(const initial_suspend_awaiter& other) {
-//         value_ = other.GetValue();
-//     }
-
-//     return_type GetValue(){
-//         return value_;
-//     }
-//     constexpr bool await_ready() const noexcept { return false; }
-
-//     constexpr void await_suspend(std::coroutine_handle<> h)  {
-//            std::async([=](){
-//                 //挂起当前线程模拟耗时操作
-//                 std::this_thread::sleep_for(std::chrono::seconds(1));
-//                 h.resume();
-//             });
-//     }
-
-//     return_type await_resume() const noexcept { 
-//         std::cout << "has value : " << value_ << std::endl;
-//         return value_;
-//     }
-    
-//     return_type value_ = return_type();
-// };
-
-
-
 template <typename ReturnType>
 class promise_base{
     virtual ReturnType get_value() = 0;
@@ -165,7 +141,7 @@ struct Promise:promise_base< typename CoTask::return_type>
 {
     using return_type  = typename CoTask::return_type ;
     // TODO（leo）暂时用 必然 挂起
-    initial_suspend_awaiter<return_type> initial_suspend() { return initial_suspend_awaiter<return_type>(return_type()); };
+    suspend_awaiter<return_type> initial_suspend() { return suspend_awaiter<return_type>(return_type()); };
  
     final_suspend_controler_awaiter final_suspend() noexcept { return {}; }
     void unhandled_exception(){}
@@ -193,18 +169,19 @@ struct Promise:promise_base< typename CoTask::return_type>
     // 模板化，不然CoroutineTask<int>中没法co_awaitCoroutineTask<char> 
     // template<typename CoTask2>
     // 其实是与promise 类型无关的，感觉还是重载运算符更好点
+    // 用于在协程中co_await协程
     template<typename CoTask2>
-    initial_suspend_awaiter< typename CoTask2::return_type > await_transform(CoTask2 task){
+    suspend_awaiter< typename CoTask2::return_type > await_transform(CoTask2 task){
         // 注意这个类型CoTask2 不是该promise对应的CoTask
         std::cout<< "await_transform " << (static_cast<typename CoTask2::promise_type *>(task.p_)->get_value()) << std::endl;
         std::cout << "task promise address : " << task.p_ << std::endl;
         std::cout << "this  : " << this << std::endl;
-        return initial_suspend_awaiter<typename CoTask2::return_type>(static_cast<typename CoTask2::promise_type *>(task.p_)->get_value());
+        return suspend_awaiter<typename CoTask2::return_type>(static_cast<typename CoTask2::promise_type *>(task.p_)->get_value());
     }
 
     // // template<typename CoTask2>
-    // initial_suspend_awaiter<CoTask> await_transform(CoTask task){
-    //     return initial_suspend_awaiter<CoTask>();
+    // suspend_awaiter<CoTask> await_transform(CoTask task){
+    //     return suspend_awaiter<CoTask>();
     // }
     // return_type  value_;
     return_type value_;
