@@ -23,6 +23,9 @@ std::vector<std::coroutine_handle<> > resume_queue;
 // destory queue 可以让协程的销毁交给其他线程，提高主线程处理效率
 std::vector<std::coroutine_handle<> > destory_queue;
 
+  
+
+
 // 策略模式
 template <enum EnumSuspendStrategy>
 struct  SuspendStrategy;
@@ -60,24 +63,29 @@ struct  SuspendStrategy<EnumSuspendStrategy::FinishSuspend>
     }
 };
 
-
-template <typename  ReturnType, typename SuspendStrategy = SuspendStrategy<EnumSuspendStrategy::CommonSuspend> >
+// TODO(leo)有没有办法避免多余的awaiter创建
+template <typename  ReturnType, bool NeedSuspend = true,  typename SuspendStrategy = SuspendStrategy<EnumSuspendStrategy::CommonSuspend> >
 struct suspend_awaiter
 {
     using return_type = ReturnType;
     // 是不是可以把task传递出来，把handle保存在Promise中
     suspend_awaiter(return_type value){
+        std::cout << "suspend_awaiter(return_type value)" << std::endl;
         value_ = value;
     }
 
+
+
     template <typename U>
     suspend_awaiter(const suspend_awaiter<U>& other) {
+        std::cout << "suspend_awaiter(const suspend_awaiter<U>& other) " << std::endl;
         // 这里可以实现具体的类型转换逻辑
         // 例如，如果 T 和 U 可以相互转换，可以在这里进行相应的转换
         value_ = static_cast<return_type>(other.GetValue());
     }
 
     suspend_awaiter(const suspend_awaiter& other) {
+        std::cout << "suspend_awaiter(const suspend_awaiter& other)" << std::endl;
         value_ = other.GetValue();
     }
 
@@ -86,11 +94,14 @@ struct suspend_awaiter
         return value_;
     }
     // TODO(leo) 参考boost库中 实现方式 的initail时await_ready返回true，不挂起
+    // // TODO（leo）暂时用 必然 挂起,如果希望调度，挂起，否则不挂起，按照程序流走
     // include/boost/outcome/detail/coroutine_support.ipp
-    constexpr bool await_ready() const noexcept { return false; }
+     bool await_ready() const noexcept { 
+        return false; 
+    }
     //  constexpr bool await_ready() const noexcept { return true; }
 
-    constexpr void await_suspend(std::coroutine_handle<> h)  {
+    void await_suspend(std::coroutine_handle<> h)  {
         SuspendStrategy do_supend(h);
         // h.resume();
         //    std::async([=](){
@@ -109,7 +120,7 @@ struct suspend_awaiter
         // auto a =  h_.promise().value_;
         // auto b =  h_.promise().value_;
         // std::cout << "Type of result: " << typeid(a).name() << std::endl;
-        std::cout << "has value : " << value_ << std::endl;
+        // std::cout << "has value : " << value_ << std::endl;
         return value_;
         //  std::cout << "has_value : " << a.value() << std::endl;  //这个为什么是null
         // std::cout << "await_resume : " << h_.promise().value_ << std::endl;
@@ -120,10 +131,14 @@ struct suspend_awaiter
     
     // CoTask &task_;
     return_type value_ = return_type();
+    bool need_suspend_ = NeedSuspend;
 };
 
 struct final_suspend_controler_awaiter
 {
+    final_suspend_controler_awaiter(){
+        std::cout << "final_suspend_controler_awaiter()" << std::endl;
+    }
     constexpr bool await_ready() const noexcept { return true; }
 
     constexpr void await_suspend(std::coroutine_handle<>) const noexcept {}
@@ -140,17 +155,24 @@ template<typename CoTask>
 struct Promise:promise_base< typename CoTask::return_type>
 {
     using return_type  = typename CoTask::return_type ;
-    // TODO（leo）暂时用 必然 挂起
-    suspend_awaiter<return_type> initial_suspend() { return suspend_awaiter<return_type>(return_type()); };
- 
-    final_suspend_controler_awaiter final_suspend() noexcept { return {}; }
+    bool is_initted_ = false;
+
+    auto initial_suspend() {
+        // TODO(leo这个怎么处理)？最先的三个awaiter是哪里来的 initial
+        std::cout<< "initial_suspend() " << std::endl;
+        return suspend_awaiter<return_type, false>(return_type()); 
+    };
+    
+    // 建议挂起用于区分序列发生器，无限序列发生器永远不会走到这
+    final_suspend_controler_awaiter final_suspend() noexcept { 
+        std::cout<< "final_suspend() " << std::endl;
+        return {}; 
+    }
     void unhandled_exception(){}
     CoTask get_return_object(){ 
-        std::cout << "get_return_object this :"  << this << std::endl;
-        CoTask task;
-        task.p_ = this;
-        // return {.p = this;}; 
-        return  task;
+        // std::cout << "get_return_object this :"  << this << std::endl;
+        is_initted_ = true; //避免创建多余的awaitable
+        return  CoTask(this);
     }
 
     return_type get_value(){
@@ -162,20 +184,22 @@ struct Promise:promise_base< typename CoTask::return_type>
 
     void return_value(return_type value){
         value_ = value;
-         std::cout<< "return_value " << value << std::endl;
-        // std::cout<< "return_value : " << value_.value() << std::endl;
+        std::cout<< "return_value " << value << std::endl;
     }
 
     // 模板化，不然CoroutineTask<int>中没法co_awaitCoroutineTask<char> 
     // template<typename CoTask2>
     // 其实是与promise 类型无关的，感觉还是重载运算符更好点
     // 用于在协程中co_await协程
+    
+    //协程中挂起协程时做类型转换
+    // 这里必须传右值，不然会报错，是否就意味着，这里可以传 协程不希望被拷贝，那不如直接禁止拷贝传参
     template<typename CoTask2>
-    suspend_awaiter< typename CoTask2::return_type > await_transform(CoTask2 task){
+    suspend_awaiter< typename CoTask2::return_type > await_transform(CoTask2 &&task){
         // 注意这个类型CoTask2 不是该promise对应的CoTask
         std::cout<< "await_transform " << (static_cast<typename CoTask2::promise_type *>(task.p_)->get_value()) << std::endl;
-        std::cout << "task promise address : " << task.p_ << std::endl;
-        std::cout << "this  : " << this << std::endl;
+        // std::cout << "task promise address : " << task.p_ << std::endl;
+        // std::cout << "this  : " << this << std::endl;
         return suspend_awaiter<typename CoTask2::return_type>(static_cast<typename CoTask2::promise_type *>(task.p_)->get_value());
     }
 
@@ -196,29 +220,43 @@ struct Promise:promise_base< typename CoTask::return_type>
 //TODO(shenlish) 偏特化CoroutineTask<>作为返回值类型为void，可以static_assert来避免使用时用接无返回值的情况
 template <typename ReturnType>
 struct CoroutineTask{
-    
+
     using return_type  = ReturnType;
-    using promise_type = Promise< CoroutineTask>;
-    template <typename U>
-    CoroutineTask(CoroutineTask<U> other) {
+    using promise_type = Promise<CoroutineTask>;
+
+    CoroutineTask(const CoroutineTask &other) = delete;
+    CoroutineTask(const CoroutineTask &&other) = delete;
+    CoroutineTask& operator=(const CoroutineTask&) = delete;
+    CoroutineTask& operator=(const CoroutineTask&&) = delete;
+    // 正常挂起不会调用该函数的，这个用于直接获取
+    // TODO(leo) 该不该不await直接获取直接获取协程函数的返回值？报警？避免编译通过？如何编译期报错？
+
+    // 没co_await的不应该能获取到coroutine_task,即使获得得到的结果也不一定是对的
+    // template <typename U>
+    // CoroutineTask(CoroutineTask<U> &other) {
+    //     // 这里可以实现具体的类型转换逻辑
+    //     // 例如，如果 T 和 U 可以相互转换，可以在这里进行相应的转换
+    //     // p_ = static_cast<promise_base * >(other.GetPromise());
+    //     p_ = other.GetPromise();
+    // }
+    // 
+    // operator ReturnType() const {
+    //     return static_cast<promise_type *>(p_)->get_value();
+    // }
+
+    // 直接禁止拷贝构造，因为在协程运行的await_transfrom中我们只用到了右值
+  
+
+    CoroutineTask(promise_type* promise) {
         // 这里可以实现具体的类型转换逻辑
         // 例如，如果 T 和 U 可以相互转换，可以在这里进行相应的转换
         // p_ = static_cast<promise_base * >(other.GetPromise());
-        p_ = other.GetPromise();
+        p_ = promise;
+        
     }
 
-    CoroutineTask(){
-        p_ = nullptr;
-    }
-    void* GetPromise(){
-        return p_;
-    }
-
-    // std::coroutine_handle<promise_type> handle_;
     void *p_ = nullptr;
-    operator ReturnType() const {
-        return static_cast<promise_type *>(p_)->get_value();
-    }
+
 };
 
 // template <typename ReturnType>
@@ -260,10 +298,12 @@ CoroutineTask<u_int64_t> second_coroutine(){
 
 CoroutineTask<char> first_coroutine(){
     // int a = co_await second_coroutine();
-    int a = second_coroutine();
-    std::cout << "!!!!!!" << std::endl;
-    // double a = co_await third_coroutine();
-    std::cout << " co_await second_coroutine() : " <<  a << std::endl;
+    // second_coroutine();
+    // std::cout << "!!!!!!" << std::endl;
+
+    // 不应该在这能直接得到协程的值
+    u_int64_t a = co_await second_coroutine();  
+    std::cout << " co_await second_coroutine() : "<< std::endl;
     co_return 'b';
 }
 
@@ -274,17 +314,22 @@ CoroutineTask<char> first_coroutine(){
 // }
 
 // TODO(shenglish) 这个为什么是有序的？
-int test_func(int i){
-    std::cout << "# main : " <<  i  << std::endl;
-    // 如果没有恢复，这里返回数据会不对
-    char a = first_coroutine();
-    std::cout << " main" << i << " :" <<  a << std::endl;
-}
+// int test_func(int i){
+//     std::cout << "# main : " <<  i  << std::endl;
+//     // 如果没有恢复，这里返回数据会不对
+//     char a = first_coroutine();
+//     std::cout << " main" << i << " :" <<  a << std::endl;
+// }
 
 
 // todo(shenglish)使用包装boost异步io write read
 int main(){
-    test_func(1);
-    test_func(2);
+    // test_func(1);s
+    // test_func(2);
+    std::cout << "first_coroutine() : "  << std::endl;
+    first_coroutine();
     getchar();
 }
+
+
+// 三个协程至少会创建3次awaiter   有两个co_await  在 await_transform 会创建两次awaiter
