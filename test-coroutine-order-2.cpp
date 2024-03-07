@@ -37,6 +37,8 @@ using FinishSuspendStrategy = SuspendStrategy<EnumSuspendStrategy::FinishSuspend
 template <typename ReturnType>
 class promise_base;
 
+template<typename CoTask>
+struct Promise;
 
 template <>
 struct  SuspendStrategy<EnumSuspendStrategy::CommonSuspend>
@@ -66,15 +68,15 @@ struct  SuspendStrategy<EnumSuspendStrategy::FinishSuspend>
     }
 };
 
-template <typename  ReturnType, bool NeedSuspend = true,  typename SuspendStrategy = SuspendStrategy<EnumSuspendStrategy::CommonSuspend> >
+template <typename  CoTask, bool NeedSuspend = true,  typename SuspendStrategy = SuspendStrategy<EnumSuspendStrategy::CommonSuspend> >
 struct suspend_awaiter
 {
-    using return_type = ReturnType;
+    using return_type =  typename CoTask::return_type;
     // 是不是可以把task传递出来，把handle保存在Promise中
     // template <typename ReturnType2>
-    suspend_awaiter(return_type value, promise_base<return_type>* promise){
+    suspend_awaiter(Promise<CoTask>* promise){
         std::cout << "suspend_awaiter(return_type value)" << std::endl;
-        value_ = value;
+        // value_ = value;
         promise_ = promise;
     }
 
@@ -115,7 +117,7 @@ struct suspend_awaiter
 
     return_type await_resume() const noexcept { 
         std::cout << "await_resume" << std::endl;
-        return value_;
+        return promise_->get_value();
     }
     
     return_type value_ = return_type();
@@ -193,7 +195,7 @@ struct Promise:promise_base< typename CoTask::return_type>
 
     auto initial_suspend() {
         std::cout<< "initial_suspend() " << std::endl;
-        return suspend_awaiter<return_type, false>(return_type(), this); 
+        return suspend_awaiter<CoTask, false>(this); 
     };
     
     final_suspend_controler_awaiter final_suspend() noexcept { 
@@ -225,10 +227,10 @@ struct Promise:promise_base< typename CoTask::return_type>
     // TODO(leo)这个和promise 无关是不是从类内一处来比较好？
     // 这个没必要被返回类型为awaiter 替代掉，方便已经定义协程，添加到另外一个协程中await
     template<typename CoTask2>
-    suspend_awaiter< typename CoTask2::return_type > await_transform(CoTask2 &&task){
+    suspend_awaiter<CoTask2> await_transform(CoTask2 &&task){
 
-        std::cout<< "await_transform " << (static_cast<typename CoTask2::promise_type *>(task.p_)->get_value()) << std::endl;
-        return suspend_awaiter<typename CoTask2::return_type>(static_cast<typename CoTask2::promise_type *>(task.p_)->get_value(),  static_cast<typename CoTask2::promise_type *>(task.p_));
+        // std::cout<< "await_transform " << (static_cast<typename CoTask2::promise_type *>(task.p_)->get_value()) << std::endl;
+        return suspend_awaiter<CoTask2>(task.p_);
     }
     template<typename T>
     suspend_controler_awaiter<T> await_transform(suspend_controler_awaiter<T> &&awaiter){
@@ -246,6 +248,8 @@ struct Promise:promise_base< typename CoTask::return_type>
     return_type value_;
 };
 
+
+// TODO(leo) p_是不是可以不是void类型
 template <typename ReturnType>
 struct CoroutineTask{
 
@@ -262,7 +266,7 @@ struct CoroutineTask{
         
     }
 
-    void *p_ = nullptr;
+    promise_type *p_ = nullptr;
 
 };
 
