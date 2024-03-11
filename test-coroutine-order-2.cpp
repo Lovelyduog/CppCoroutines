@@ -68,7 +68,7 @@ struct  SuspendStrategy<EnumSuspendStrategy::FinishSuspend>
     }
 };
 
-template <typename  CoTask, bool NeedSuspend = true,  typename SuspendStrategy = SuspendStrategy<EnumSuspendStrategy::CommonSuspend> >
+template <typename CoTask,  typename SuspendStrategy = SuspendStrategy<EnumSuspendStrategy::CommonSuspend> >
 struct suspend_awaiter
 {
     using return_type =  typename CoTask::return_type;
@@ -76,31 +76,29 @@ struct suspend_awaiter
     // template <typename ReturnType2>
     suspend_awaiter(Promise<CoTask>* promise){
         std::cout << "suspend_awaiter(return_type value)" << std::endl;
-        // value_ = value;
         promise_ = promise;
     }
 
 
+    // //TODO(leo)禁止拷贝构造函数使用移动构造含
+    // template <typename U>
+    // suspend_awaiter(const suspend_awaiter<U>& other) {
+    //     std::cout << "suspend_awaiter(const suspend_awaiter<U>& other) " << std::endl;
+    //     // value_ = static_cast<return_type>(other.GetValue());
+    // }
 
-    template <typename U>
-    suspend_awaiter(const suspend_awaiter<U>& other) {
-        std::cout << "suspend_awaiter(const suspend_awaiter<U>& other) " << std::endl;
-        value_ = static_cast<return_type>(other.GetValue());
-    }
-
-    suspend_awaiter(const suspend_awaiter& other) {
-        std::cout << "suspend_awaiter(const suspend_awaiter& other)" << std::endl;
-        value_ = other.GetValue();
-    }
+    // suspend_awaiter(const suspend_awaiter& other) {
+    //     std::cout << "suspend_awaiter(const suspend_awaiter& other)" << std::endl;
+    //     value_ = other.GetValue();
+    // }
 
 
-    return_type GetValue(){
-        return value_;
-    }
+    // return_type GetValue(){
+    //     return value_;
+    // }
 
     // 当时initial_suspend返回的awaiter时，挂起，直接resume
     bool await_ready() const noexcept { 
-        // return false; 
         std::cout << "await_ready is_initted : " << promise_->is_initted() <<  std::endl;
         return !promise_->is_initted();
     }
@@ -120,11 +118,13 @@ struct suspend_awaiter
         return promise_->get_value();
     }
     
-    return_type value_ = return_type();
-    bool need_suspend_ = NeedSuspend;
     promise_base<return_type> *promise_;
 };
 
+// TODO(leo)优化下这里的代码
+//文件的异步读写操作呢
+//丢到线程池里去，而不交给线程epoll接管吗，因为很可能读完就立刻关闭文件了
+// 可以封装一个socket，接入协程
 template <typename  ReturnType, bool NeedSuspend = true,  typename SuspendStrategy = SuspendStrategy<EnumSuspendStrategy::CommonSuspend> >
 struct suspend_controler_awaiter
 {
@@ -180,6 +180,7 @@ struct final_suspend_controler_awaiter
     constexpr void await_resume() const noexcept {} 
 };
 
+//TODO(leo) base目前没起到作用
 template <typename ReturnType>
 class promise_base{
 public:
@@ -195,7 +196,7 @@ struct Promise:promise_base< typename CoTask::return_type>
 
     auto initial_suspend() {
         std::cout<< "initial_suspend() " << std::endl;
-        return suspend_awaiter<CoTask, false>(this); 
+        return suspend_awaiter<CoTask>(this); 
     };
     
     final_suspend_controler_awaiter final_suspend() noexcept { 
@@ -209,7 +210,6 @@ struct Promise:promise_base< typename CoTask::return_type>
     }
 
     return_type get_value() override{
-        is_initted_ = true;
         return value_;
     }
 
@@ -219,6 +219,7 @@ struct Promise:promise_base< typename CoTask::return_type>
     }
 
     void return_value(return_type value){
+        is_initted_ = true;
         value_ = value;
         std::cout<< "return_value " << value << std::endl;
     }
