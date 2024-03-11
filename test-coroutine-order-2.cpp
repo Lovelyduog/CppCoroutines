@@ -34,8 +34,8 @@ using CommonSuspendStrategy = SuspendStrategy<EnumSuspendStrategy::CommonSuspend
 using OtherThreadSuspendStrategy = SuspendStrategy<EnumSuspendStrategy::OtherThreadSuspend>;
 using FinishSuspendStrategy = SuspendStrategy<EnumSuspendStrategy::FinishSuspend>;
 
-template <typename ReturnType>
-class promise_base;
+// template <typename ReturnType>
+// class promise_base;
 
 template<typename CoTask>
 struct Promise;
@@ -72,9 +72,10 @@ template <typename CoTask,  typename SuspendStrategy = SuspendStrategy<EnumSuspe
 struct suspend_awaiter
 {
     using return_type =  typename CoTask::return_type;
+    using promise_type = typename CoTask::promise_type;
     // 是不是可以把task传递出来，把handle保存在Promise中
     // template <typename ReturnType2>
-    suspend_awaiter(Promise<CoTask>* promise){
+    suspend_awaiter(promise_type* promise){
         std::cout << "suspend_awaiter(return_type value)" << std::endl;
         promise_ = promise;
     }
@@ -108,9 +109,10 @@ struct suspend_awaiter
     //     SuspendStrategy do_supend(h);
     // }
 
-    std::coroutine_handle<> await_suspend(std::coroutine_handle<> h)  {
+    void await_suspend(std::coroutine_handle<> h)  {
         std::cout << "await_suspend" << std::endl;
-        return h;
+        SuspendStrategy do_supend(h);
+        // return h;
     }
 
     return_type await_resume() const noexcept { 
@@ -118,7 +120,9 @@ struct suspend_awaiter
         return promise_->get_value();
     }
     
-    promise_base<return_type> *promise_;
+    // promise_base<return_type> *promise_;
+    // promise_type *promise_;
+    Promise<CoTask>* promise_;
 };
 
 // TODO(leo)优化下这里的代码
@@ -271,9 +275,6 @@ struct CoroutineTask{
 
 };
 
-int test_func(){
-    return 1;
-}
 
 // TODO(leo) 
 // 协程co_await  返回值为awaiter的函数而不是co_wait协程函数
