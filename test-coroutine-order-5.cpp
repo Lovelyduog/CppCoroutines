@@ -337,6 +337,7 @@ void do_work() {
     {
         // 加锁
         // std::cout << "void do_work()  "   << std::endl;
+        std::this_thread::sleep_for(std::chrono::seconds(1)); //！！！！！还有这个加锁要在锁钱前不然，让出cpu后，由于还没有解锁，又会被其他线程再拿到锁，这样就死锁了
 
         std::lock_guard<std::mutex> g(m);
 
@@ -350,7 +351,6 @@ void do_work() {
         // g_raw_work_queue.assign(g_work_queue.begin(), g_work_queue.end());   //！！！！！！！这里有个大坑坑查了好久，如果连续两次先进来这里，会把g_raw_work_queue中的元素给清理掉，导致后面无法恢复
         g_work_queue.clear();
         // std::cout << " g_raw_work_queue size " << g_raw_work_queue.size()   << std::endl;
-        // std::this_thread::sleep_for(std::chrono::seconds(1));
     }   
     
 }
@@ -381,7 +381,7 @@ int main(){
     {
         do_reume();
         // 每隔1秒取一次完成的异步任务
-        // std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
     
     work_thread.join();
