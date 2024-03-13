@@ -10,7 +10,7 @@
 #include <vector>
 
 std::mutex m;
-std::mutex m2;
+// std::mutex m2;
 // std::condition_variable cv;
 
 
@@ -284,7 +284,7 @@ struct async_task: public async_task_base{
     }
 
     void resume() override{
-        std::cout << "async_task ::  resume" << std::endl;
+        std::cout << "async_task ::  resume ############" << std::endl;
         owner_.h_.resume();
     }
     AsyncAwaiter<ReturnType> &owner_ ;
@@ -302,62 +302,67 @@ CoroutineTask<u_int64_t> second_coroutine(){
 //     return AsyncAwaiter(info);
 // }
 
-uint64_t hard_working()  {
-    std::cout<< "do a slow work !!!!!!!!!!!!!!!!!!!!!" << std::endl;
-    return 1;
-};
+// uint64_t hard_working()  {
+//     std::cout<< "do a slow work !!!!!!!!!!!!!!!!!!!!!" << std::endl;
+//     return 1;
+// };
 
 // 模拟耗时操作
 // TODO(leo)AsyncThread返回值根据传入的func返回值获取
 //TODO(leo)试一下alambda从外部传参给do_slow_work
-AsyncThread<uint64_t> do_slow_work(){
-    auto func =[]() -> uint64_t{
-        std::cout<< "do a slow work !!!!!!!!!!!!!!!!!!!!!" << std::endl;
-        return 1;
-    };
-    // return AsyncThread<uint64_t>(hard_working);
-    return AsyncThread<uint64_t>(func);
+template <typename ReturnType>
+AsyncThread<ReturnType> do_slow_work(std::function< ReturnType () > &&func){
+    
+    // 必须使用完美转发
+    return AsyncThread<ReturnType>(std::forward< std::function< ReturnType () > >(func));
 }
 
 CoroutineTask<char> first_coroutine(){
-    co_await do_slow_work();
+    auto func =[]() -> uint64_t{
+        std::cout<< "do a slow work !!!!!!!!!!!!!!!!!!!!!" << std::endl;
+        return 1;
+    };    
+    std::cout << "before  co_await do_slow_work " << std::endl; 
+    uint64_t result = co_await do_slow_work<uint64_t>(func);
+    std::cout << "@@@@@@@@@ result is  : " << result  << std::endl; 
+    // std::cout << "！！！！！ result  is : " << result << std::endl; //这一行不是原子的
     co_return 'b';
 }
+
 
 void do_work() {
     while (1)
     {
         // 加锁
         std::cout << "void do_work()  "   << std::endl;
-        std::vector<std::shared_ptr<async_task_base>> work_queue;
-        m.lock();
-        work_queue.swap(g_work_queue);
-        m.unlock();
 
-        for(auto &task : work_queue){
+        std::lock_guard<std::mutex> g(m);
+
+        std::cout << " g_work_queue size " << g_raw_work_queue.size()   << std::endl;
+
+        for(auto &task : g_work_queue){
             task->completed();
         }
-
-        m2.lock();
+        
         // for(auto task : work_queue)
-        g_raw_work_queue.swap(work_queue);
-        m2.unlock();
+        g_raw_work_queue.assign(g_work_queue.begin(), g_work_queue.end());
+        g_work_queue.clear();
+        std::cout << " g_raw_work_queue size " << g_raw_work_queue.size()   << std::endl;
         std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
+    }   
     
 }
 
 void do_reume(){
-    std::vector<std::shared_ptr<async_task_base>> work_queue;
     std::cout << "void do_reume()" << std::endl;
-    m2.lock();
-    work_queue.swap(g_raw_work_queue);
-    m2.unlock();
-    // std::cout << "work_queue.size() : " << work_queue.size() <<  std::endl;
-    for(auto &task : work_queue){
+    std::lock_guard<std::mutex> g(m);
+    
+    for(auto &task : g_raw_work_queue){
         task->resume();
     }
+    g_raw_work_queue.clear();
 }
+
 
 int main(){
     std::thread work_thread(do_work);
@@ -370,6 +375,7 @@ int main(){
     while (1)
     {
         do_reume();
+        // 每隔1秒取一次完成的异步任务
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
     
