@@ -71,6 +71,7 @@
         "map": "cpp",
         "set": "cpp",
         "typeindex": "cpp",
-        "variant": "cpp"
+        "variant": "cpp",
+        "queue": "cpp"
     }
 }
