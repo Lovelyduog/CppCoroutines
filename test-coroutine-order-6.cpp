@@ -8,6 +8,16 @@
 #include <mutex>
 #include <memory>
 #include <vector>
+#include <sys/epoll.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <assert.h>
+#include <unistd.h>
+#include <string.h>
+#include <fcntl.h>  
+#include <unordered_map>
 
 std::mutex m;
 // std::mutex m2;
@@ -18,51 +28,15 @@ std::mutex m;
 template <typename ReturnType>
 struct CoroutineTask;
 
-
-enum class EnumSuspendStrategy:uint32_t{
-    CommonSuspend ,
-    OtherThreadSuspend,
-    FinishSuspend
-};
-
-
-
-// 策略模式
-template <enum EnumSuspendStrategy>
-struct  SuspendStrategy;
-
-using CommonSuspendStrategy = SuspendStrategy<EnumSuspendStrategy::CommonSuspend>;
-//TODO(leo)可以加queue可指定
-using OtherThreadSuspendStrategy = SuspendStrategy<EnumSuspendStrategy::OtherThreadSuspend>;
-using FinishSuspendStrategy = SuspendStrategy<EnumSuspendStrategy::FinishSuspend>;
-
-// template <typename ReturnType>
-// class promise_base;
-
 template<typename CoTask>
 struct Promise;
 
-template <>
-struct  SuspendStrategy<EnumSuspendStrategy::CommonSuspend>
-{
-    SuspendStrategy(std::coroutine_handle<> h){
-        h.resume();
-    }
-};
-
-
-
-template <>
-struct  SuspendStrategy<EnumSuspendStrategy::FinishSuspend>
-{
-    SuspendStrategy(std::coroutine_handle<> h){
-        h.destroy();
-    }
-};
+template <enum EnumAsyncIO, typename ReturnType>
+struct AsyncIOAwaiter;
 
 // 传CoTask的好处是，可以根据协程状态选择awaiter是否挂起协程
 // return_value 只会由co_return触发，所以这个只是对挂起协程使用的awaiter
-template <typename CoTask,  typename SuspendStrategy = SuspendStrategy<EnumSuspendStrategy::CommonSuspend> >
+template <typename CoTask>
 struct suspend_awaiter
 {
     using return_type =  typename CoTask::return_type;
@@ -80,7 +54,8 @@ struct suspend_awaiter
 
 
     void await_suspend(std::coroutine_handle<> h)  {
-        SuspendStrategy do_supend(h);
+        // 这里直接恢复，也可以交给eventloop进行调度恢复
+       h.resume()
     }
 
     return_type await_resume() const noexcept { 
@@ -183,8 +158,10 @@ struct Promise:promise_base< typename CoTask::return_type>
     //     return awaiter;
     // }
 
-   
-
+    template<typename T>
+    AsyncIOAwaiter<enum EnumAsyncIO, typename T> await_transform(AsyncIO<enum EnumAsyncIO, typename T> &&info){
+        return AsyncIOAwaiter<enum EnumAsyncIO, typename T>(info);
+    }
 
     return_type value_;
 };
@@ -261,6 +238,9 @@ struct AsyncAwaiter
     return_type value_ = return_type();
 };
 
+
+
+
 struct async_task_base
 {
     virtual void completed() = 0;
@@ -301,6 +281,15 @@ AsyncThread<ReturnType> do_slow_work(std::function< ReturnType () > &&func){
     return AsyncThread<ReturnType>(std::forward< std::function< ReturnType () > >(func));
 }
 
+
+// 该函数用于验证c++重载
+char do_slow_work(std::function<char () > &&func){
+    
+    // 必须使用完美转发
+    return 'c';
+}
+
+
 CoroutineTask<char> first_coroutine(){
     auto func =[]() -> uint64_t{
         std::cout<< "do a slow work !!!!!!!!!!!!!!!!!!!!!" << std::endl;
@@ -314,6 +303,7 @@ CoroutineTask<char> first_coroutine(){
     std::cout << "@@@@@@@@@ result is  : " << result  << std::endl; 
     co_return 'b';
 }
+
 
 
 void do_work() {
@@ -344,10 +334,301 @@ void test_func(){
 }
 
 
+// ========================================================================================================================
+/*TODO(leo)天机协程做异步写，是哟个异步写的文件文件描述符存到await在,close后，添加到协程中，
+最后统一从协程对象中移除？或者在awaiter销毁时从epoll中移除？不能再await析构中，可能会多次从epoll中移除。需要需要关闭的fd
+
+*/
+
+
+class file_descriptor;
+
+enum class EnumAsyncIO:uint32_t{
+    EnumAsyncIOWrite,
+    EnumAsyncIORead,
+    EnumAsyncIOClose
+};
+
+namespace 
+{
+
+    file_descriptor create_fd(const char *path, int mode){
+        int fd = open(path, mode);
+        return file_descriptor(fd);
+    }
+
+    void set_nonblocking(int fd){
+
+        int ops = fcntl(fd, F_GETFL);
+        if(ops < 0){
+            perror("int ops = fcntl(fd, F_GETFL)");
+        }
+
+        ops |= O_NONBLOCK;
+
+        if(fcntl(fd, F_SETFL, ops)){
+            perror("fcntl(fd, F_SETFL, ops)");
+        }
+    }
+} 
+
+
+// 策略模式
+template <enum EnumAsyncIO>
+struct  AsyncIOStrategy;
+
+using AsyncIOStrategyWrite = AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOWrite>;
+//TODO(leo)可以加queue可指定
+using AsyncIOStrategyWriteIORead = AsyncIOStrategy<EnumAsyncIO::EnumAsyncIORead>;
+using AsyncIOStrategyWriteClose = AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOClose>;
+
+// template <typename ReturnType>
+// class promise_base;
+
+
+// TODO(leo)策略是否需要包含移交给epoll还是说移交仅仅交给awaiter?
+// 等下需要实现AsyncIO 到 awaiter的转换，以及awaiter和epoll的交互
+
+template <>
+struct  AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOWrite>
+{
+    AsyncIOStrategy(file_descriptor& fd, void *buf, size_t n):fd_(fd),buf_(buf),num_(n){
+        set_nonblocking(fd_.fd_);
+        fd_.need_remove_from_epoll_ = true;
+        fd_.events_.events |= EPOLLOUT;
+    }
+
+    int complete(){
+       return write(fd_.fd_, buf_, num_);
+    }
+    size_t num_;
+    void *buf_;
+    file_descriptor fd_;
+};
+
+template <>
+struct  AsyncIOStrategy<EnumAsyncIO::EnumAsyncIORead>
+{
+    AsyncIOStrategy(file_descriptor& fd, void *buf, size_t n):fd_(fd),buf_(buf),num_(n){
+        set_nonblocking(fd_.fd_);
+        fd_.need_remove_from_epoll_ = true;
+        fd_.events_.events |= EPOLLOUT;
+    }
+
+    int complete(){
+       return read(fd_.fd_, buf_, num_);
+    }
+
+    size_t num_;
+    void *buf_;
+    file_descriptor fd_;
+};
+
+template <>
+struct  AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOClose>
+{
+    AsyncIOStrategy(file_descriptor& fd, void *buf, size_t n):fd_(fd){
+        fd_.need_remove_from_epoll_ = true;
+        fd_.events_.events |= EPOLLIN;
+    }
+
+    int complete(){
+       int ret = close(fd_.fd_);
+       if(ret >0 )
+       {
+         fd_.need_remove_from_epoll_ = false;
+       }
+       return ret;
+    }
+    file_descriptor fd_;
+};
+
+
+// 使用继承多态 传给epoll避免类型恢复的问题
+template <enum EnumAsyncIO, typename ReturnType>
+struct AsyncIOAwaiter:public async_task_base
+{
+    using return_type = ReturnType;
+
+    AsyncIOAwaiter(AsyncIO<EnumAsyncIO, ReturnType>& info):stragtegy_(info.fd_, info.buf_, info.num_){
+        value_ = return_type{};
+    }
+
+
+
+    bool await_ready() const noexcept { 
+        return false; 
+    }
+
+    void await_suspend(std::coroutine_handle<> h)  {
+        h_ = h;
+        struct epoll_event event = fd_.events_;
+        event.data.ptr = this;
+        if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event) == -1) {
+                
+            //TODO(leo) 后续完善异常处理
+            // 如果文件描述符已存在，errno将被设置为EEXIST
+            if (errno == EEXIST) {
+                printf("File descriptor %d already added, modifying.\n", fd);
+                    
+                // 修改已存在的文件描述符的事件
+                if (epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &event) == -1) {
+                    printf("Failed to modify file descriptor %d: %s\n", fd, strerror(errno));
+                }
+            } else {
+                printf("Failed to add file descriptor %d: %s\n", fd, strerror(errno));
+                // 这里需要进行错误处理
+            }
+        }
+
+
+    }
+
+    return_type await_resume() const noexcept { 
+        return value_;
+    }
+
+    //实现接口epoll返回时调用
+    void completed() override{
+        ReturnType result = stragtegy_.complete();
+        value_ = result;
+    }
+
+    void resume() override{
+        // std::cout << "async_task ::  resume ############" << std::endl;
+        h_.resume();
+    }
+
+    std::coroutine_handle<> h_;;
+
+    return_type value_ = return_type();
+    AsyncIOStrategy<EnumAsyncIO>   stragtegy_;
+};
+
+
+template <typename ReturnType>
+struct AsyncIOAwaiter<EnumAsyncIO::EnumAsyncIOClose, ReturnType>:public async_task_base
+{
+    using return_type = ReturnType;
+
+    AsyncIOAwaiter(AsyncIO<EnumAsyncIO, ReturnType>& info):stragtegy_(info.fd_){
+        value_ = return_type{};
+    }
+
+
+
+    bool await_ready() const noexcept { 
+        return false; 
+    }
+
+    void await_suspend(std::coroutine_handle<> h)  {
+        h_ = h;
+        /
+        // 是不是要移交给epoll处理呢？
+    }
+
+    return_type await_resume() const noexcept { 
+        return value_;
+    }
+    std::coroutine_handle<> h_;;
+
+    return_type value_ = return_type();
+    AsyncIOStrategy<EnumAsyncIO>   stragtegy_;
+};
+
+
+//返回值默认为int
+// template <  template < enum EnumAsyncIO >  typename IoStrategy = AsyncIOStrategy, typename ReturnType = int>
+template <enum EnumAsyncIO , typename ReturnType = int>
+struct  AsyncIO
+{
+    
+    using return_type = ReturnType;
+
+    AsyncIO(file_descriptor &fd, const void *buf, size_t n):fd_(fd),stragtegy_(fd, buf, n){
+
+    }
+
+    file_descriptor fd_;
+};
+
+template <typename ReturnType>
+struct  AsyncIO<EnumAsyncIO::EnumAsyncIOClose, ReturnType>
+{
+    
+    using return_type = ReturnType;
+
+    AsyncIO(file_descriptor &fd):fd_(fd),stragtegy_(fd){
+
+    }
+    file_descriptor fd_;
+    AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOClose>   stragtegy_;
+};
+
+// TODO(leo)这个类保存awaiter，添加到epoll监视集合的ptr中，epoll出发后，执行任务
+// template <enum EnumAsyncIO, typename ReturnType>
+// struct async_io_task: public async_task_base{
+//     async_task(AsyncIOAwaiter<EnumAsyncIO, ReturnType> &awaiter)
+//     :owner_(awaiter)
+//     {
+
+//     }
+
+//     void completed() override{
+//         ReturnType result = owner_;
+//         owner_.value_ = result;
+//     }
+
+//     void resume() override{
+//         // std::cout << "async_task ::  resume ############" << std::endl;
+//         owner_.h_.resume();
+//     }
+//     AsyncAwaiter<ReturnType> &owner_ ;
+//     // std::function< typename ReturnType ()> do_func_;
+// };
+
+
+struct file_descriptor
+{
+    int  fd_ = -1;
+    bool need_remove_from_epoll_ = false;
+    struct epoll_event events_;
+
+    file_descriptor(int fd){
+        fd_ = fd;
+        bzero(&events_, sizeof(events_));
+        events_.data.fd = fd_;
+    }
+
+    int Write(const void *buf, size_t n){
+        // 如果该文件描述符被添加在epoll中，不允许同步写
+        assert(!need_remove_from_epoll_ );
+        return write(fd_, buf, n);
+    }
+
+
+    AsyncIO<EnumAsyncIO::EnumAsyncIOWrite,int> AsyncWrite(const void *buf, size_t n){
+        return  AsyncIO<EnumAsyncIO::EnumAsyncIOWrite,int>(*this, buf, n);
+    }
+
+    AsyncIO<EnumAsyncIO::EnumAsyncIORead,int> AsyncRead(const void *buf, size_t n){
+        return  AsyncIO<EnumAsyncIO::EnumAsyncIORead,int>(*this, buf, n);
+    }
+
+    AsyncIO<EnumAsyncIO::EnumAsyncIOClose,int> AsyncClose(){
+        return  AsyncIO<EnumAsyncIO::EnumAsyncIOClose,int>(*this);
+    }
+
+};
+
+
+#define  MAX_EPOLL_EVENT_NUM 1024
+
 class event_loop
 {
 public:
-    event_loop():work_thread_(do_work){
+    event_loop():work_thread_(do_work),epoll_fd_(-1){
+        
 
     }
 
@@ -355,9 +636,62 @@ public:
         event_list_.emplace_back(func);
     }
 
+    template<enum EnumAsyncIO, typename ReturnType>
+    void epoll_add(){
+        if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event) == -1) {
+                
+            // 如果文件描述符已存在，errno将被设置为EEXIST
+            if (errno == EEXIST) {
+                printf("File descriptor %d already added, modifying.\n", fd);
+                    
+                // 修改已存在的文件描述符的事件
+                if (epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &event) == -1) {
+                    printf("Failed to modify file descriptor %d: %s\n", fd, strerror(errno));
+                    // 这里需要进行错误处理
+                }
+            } else {
+                printf("Failed to add file descriptor %d: %s\n", fd, strerror(errno));
+                // 这里需要进行错误处理
+            }
+        }
+    }
+
     void run(){
+        struct epoll_event ev, events[MAX_EPOLL_EVENT_NUM] = {};
+        epoll_fd_ = epoll_create(MAX_EPOLL_EVENT_NUM);
+
         while (1)
         {
+            // TODO()time out设置
+            int nfds = epoll_wait(epoll_fd_, events, MAX_EPOLL_EVENT_NUM, -1);
+
+            if (nfds == -1) {
+                perror("epoll_wait failed\n");
+                exit(EXIT_FAILURE);
+            }
+
+            for (int n = 0; n < nfds; ++n) {
+                if (events[n].events & EPOLLERR) {
+                    fprintf(stderr, "Error on fd %d\n", events[n].data.fd);
+                    // 处理错误
+                    continue;
+                }
+
+                if (events[n].events & EPOLLIN) {
+                    // 该描述符有可读数据
+                    // 读取并处理数据
+                    continue;
+                }
+
+                if (events[n].events & EPOLLOUT) {
+                    // 该描述符已准备好写入数据
+                    // 写入数据
+                    continue;
+                }
+
+                // 处理其他类型的事件...
+            }
+
             for(auto &func : event_list_)
             {
                 func();
@@ -370,14 +704,25 @@ public:
         getchar();
     }
 private:
+
+
+
+private:
     std::thread work_thread_;
+    int epoll_fd_;
+
     std::vector<std::function<void ()> > event_list_;
 };
 
 int main(){
     event_loop loop;
     loop.post(test_func);
-    // 主线程每秒从处理好的异步任务池中获取协程进行resume
     loop.run();
     
 }
+
+
+// 如果一个线程在文件描述符中写，而另一个线程在同时关闭了同一文件描述符，可能会引发潜在的问题。
+// 这种情况下，可能会导致写操作失败或产生异常（例如文件描述符无效或已关闭），从而造成不确定的行为。
+// 因此，在多线程操作中，需要谨慎管理文件描述符的生命周期，以避免出现不一致的状态。
+// 非如阻塞，如果a线程在写，b线程也想写入，则会报错
