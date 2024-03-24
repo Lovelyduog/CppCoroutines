@@ -343,10 +343,12 @@ void test_func(){
 
 class file_descriptor;
 
-enum class EnumAsyncIO:uint32_t{
-    EnumAsyncIOWrite,
-    EnumAsyncIORead,
-    EnumAsyncIOClose
+enum class EnumAsyncIO:int32_t{
+    EnumUndefine = -1,
+    EnumAsyncIOWrite = 0,
+    EnumAsyncIORead = 1,
+    EnumAsyncIOClose = 2,
+    EnumAllNUM = 3
 };
 
 namespace 
@@ -462,7 +464,7 @@ struct AsyncIOAwaiter:public async_task_base
 
     void await_suspend(std::coroutine_handle<> h)  {
         h_ = h;
-        struct epoll_event event = fd_.events_;
+        struct epoll_event &event = stragtegy_.fd_.events_;
         event.data.ptr = this;
         if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event) == -1) {
                 
@@ -523,7 +525,7 @@ struct AsyncIOAwaiter<EnumAsyncIO::EnumAsyncIOClose, ReturnType>:public async_ta
 
     void await_suspend(std::coroutine_handle<> h)  {
         h_ = h;
-        /
+        
         // 是不是要移交给epoll处理呢？
     }
 
@@ -545,11 +547,11 @@ struct  AsyncIO
     
     using return_type = ReturnType;
 
-    AsyncIO(file_descriptor &fd, const void *buf, size_t n):fd_(fd),stragtegy_(fd, buf, n){
+    AsyncIO(file_descriptor &fd, const void *buf, size_t n):stragtegy_(fd, buf, n){
 
     }
 
-    file_descriptor fd_;
+    AsyncIOStrategy<EnumAsyncIO>   stragtegy_;
 };
 
 template <typename ReturnType>
@@ -593,7 +595,7 @@ struct file_descriptor
     int  fd_ = -1;
     bool need_remove_from_epoll_ = false;
     struct epoll_event events_;
-
+    
     file_descriptor(int fd){
         fd_ = fd;
         bzero(&events_, sizeof(events_));
@@ -618,7 +620,10 @@ struct file_descriptor
     AsyncIO<EnumAsyncIO::EnumAsyncIOClose,int> AsyncClose(){
         return  AsyncIO<EnumAsyncIO::EnumAsyncIOClose,int>(*this);
     }
+    
+    bool has_strategy(){
 
+    }
 };
 
 
@@ -636,14 +641,16 @@ public:
         event_list_.emplace_back(func);
     }
 
+    // 将await
+    // TODO(leo)这里暂时不考虑性能问题
     template<enum EnumAsyncIO, typename ReturnType>
-    void epoll_add(){
+    void epoll_add(AsyncIOAwaiter<EnumAsyncIO::EnumAsyncIOClose, ReturnType>& awaiter){
         if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event) == -1) {
                 
             // 如果文件描述符已存在，errno将被设置为EEXIST
             if (errno == EEXIST) {
                 printf("File descriptor %d already added, modifying.\n", fd);
-                    
+                awaiter.
                 // 修改已存在的文件描述符的事件
                 if (epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &event) == -1) {
                     printf("Failed to modify file descriptor %d: %s\n", fd, strerror(errno));
@@ -657,12 +664,12 @@ public:
     }
 
     void run(){
-        struct epoll_event ev, events[MAX_EPOLL_EVENT_NUM] = {};
+        struct epoll_event  events[MAX_EPOLL_EVENT_NUM] = {};
         epoll_fd_ = epoll_create(MAX_EPOLL_EVENT_NUM);
 
         while (1)
         {
-            // TODO()time out设置
+            // TODO(leo)time out设置
             int nfds = epoll_wait(epoll_fd_, events, MAX_EPOLL_EVENT_NUM, -1);
 
             if (nfds == -1) {
@@ -671,30 +678,11 @@ public:
             }
 
             for (int n = 0; n < nfds; ++n) {
-                if (events[n].events & EPOLLERR) {
-                    fprintf(stderr, "Error on fd %d\n", events[n].data.fd);
-                    // 处理错误
-                    continue;
-                }
-
-                if (events[n].events & EPOLLIN) {
-                    // 该描述符有可读数据
-                    // 读取并处理数据
-                    continue;
-                }
-
-                if (events[n].events & EPOLLOUT) {
-                    // 该描述符已准备好写入数据
-                    // 写入数据
-                    continue;
-                }
-
-                // 处理其他类型的事件...
-            }
-
-            for(auto &func : event_list_)
-            {
-                func();
+                struct epoll_event & event = events[n];
+                async_task_base * task_ptr =  static_cast<async_task_base *>(event.data.ptr);
+                assert(task_ptr);
+                task_ptr->completed();
+                task_ptr->resume();
             }
             do_reume();
 
