@@ -19,10 +19,49 @@
 #include <fcntl.h>  
 #include <unordered_map>
 
+template <typename T>
+class Singleton {
+public:
+    static T& getInstance() {
+        if (!instance_){
+            instance_ = new T();
+        }
+        return *instance_;
+    }
+
+    Singleton(const Singleton&) = delete;
+    Singleton& operator=(const Singleton) = delete;
+
+protected:
+    Singleton() = default;
+    ~Singleton() = default;
+private:
+    static T *instance_;
+};
+
+template <typename T>
+T *Singleton<T>::instance_ = nullptr;
+
+
+enum EnumAsyncIO {
+    // EnumUndefine = -1,
+    EnumAsyncIOWrite = 0,
+    EnumAsyncIORead = 1,
+    EnumAsyncIOClose = 2,
+    EnumAllNUM = 3
+};
+
+
 std::mutex m;
 // std::mutex m2;
 // std::condition_variable cv;
 
+template <enum EnumAsyncIO>
+struct  AsyncIOStrategy;
+
+// 前置类型声明不能带默认类型采纳数
+template <EnumAsyncIO Enum, typename ReturnType>
+struct  AsyncIO;
 
 // 前置类型声明
 template <typename ReturnType>
@@ -31,7 +70,9 @@ struct CoroutineTask;
 template<typename CoTask>
 struct Promise;
 
-template <enum EnumAsyncIO, typename ReturnType>
+class file_descriptor;
+
+template <EnumAsyncIO, typename ReturnType>
 struct AsyncIOAwaiter;
 
 // 传CoTask的好处是，可以根据协程状态选择awaiter是否挂起协程
@@ -55,7 +96,7 @@ struct suspend_awaiter
 
     void await_suspend(std::coroutine_handle<> h)  {
         // 这里直接恢复，也可以交给eventloop进行调度恢复
-       h.resume()
+       h.resume();
     }
 
     return_type await_resume() const noexcept { 
@@ -158,11 +199,15 @@ struct Promise:promise_base< typename CoTask::return_type>
     //     return awaiter;
     // }
 
-    template<typename T>
-    AsyncIOAwaiter<enum EnumAsyncIO, typename T> await_transform(AsyncIO<enum EnumAsyncIO, typename T> &&info){
-        return AsyncIOAwaiter<enum EnumAsyncIO, typename T>(info);
-    }
+    // template<Enum， typename T>
+    // AsyncIOAwaiter<AsyncIO<T>::async_io_type, T> await_transform(AsyncIO<T> &&info){
+    //     return AsyncIOAwaiter <T>::async_io_type, T>(info);
+    // }
 
+    template<EnumAsyncIO Enum,typename T>   
+    AsyncIOAwaiter<Enum, T> await_transform(AsyncIO<Enum, T> &&info){
+        return AsyncIOAwaiter <Enum, T>(info);
+    }
     return_type value_;
 };
 
@@ -341,23 +386,9 @@ void test_func(){
 */
 
 
-class file_descriptor;
-
-enum class EnumAsyncIO:int32_t{
-    EnumUndefine = -1,
-    EnumAsyncIOWrite = 0,
-    EnumAsyncIORead = 1,
-    EnumAsyncIOClose = 2,
-    EnumAllNUM = 3
-};
-
 namespace 
 {
-
-    file_descriptor create_fd(const char *path, int mode){
-        int fd = open(path, mode);
-        return file_descriptor(fd);
-    }
+    
 
     void set_nonblocking(int fd){
 
@@ -375,9 +406,6 @@ namespace
 } 
 
 
-// 策略模式
-template <enum EnumAsyncIO>
-struct  AsyncIOStrategy;
 
 using AsyncIOStrategyWrite = AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOWrite>;
 //TODO(leo)可以加queue可指定
@@ -390,6 +418,21 @@ using AsyncIOStrategyWriteClose = AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOClose>
 
 // TODO(leo)策略是否需要包含移交给epoll还是说移交仅仅交给awaiter?
 // 等下需要实现AsyncIO 到 awaiter的转换，以及awaiter和epoll的交互
+
+struct file_descriptor
+{
+    int  fd_ = -1;
+    bool need_remove_from_epoll_ =false;
+    struct epoll_event events_;
+    
+    file_descriptor(int fd){
+        fd_ = fd;
+        bzero(&events_, sizeof(events_));
+        events_.data.fd = fd_;
+    }
+};
+
+
 
 template <>
 struct  AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOWrite>
@@ -405,7 +448,7 @@ struct  AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOWrite>
     }
     size_t num_;
     void *buf_;
-    file_descriptor fd_;
+    file_descriptor &fd_;
 };
 
 template <>
@@ -423,13 +466,13 @@ struct  AsyncIOStrategy<EnumAsyncIO::EnumAsyncIORead>
 
     size_t num_;
     void *buf_;
-    file_descriptor fd_;
+    file_descriptor &fd_;
 };
 
 template <>
 struct  AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOClose>
 {
-    AsyncIOStrategy(file_descriptor& fd, void *buf, size_t n):fd_(fd){
+    AsyncIOStrategy(file_descriptor& fd):fd_(fd){
         fd_.need_remove_from_epoll_ = true;
         fd_.events_.events |= EPOLLIN;
     }
@@ -442,189 +485,54 @@ struct  AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOClose>
        }
        return ret;
     }
-    file_descriptor fd_;
+    file_descriptor &fd_;
 };
-
-
-// 使用继承多态 传给epoll避免类型恢复的问题
-template <enum EnumAsyncIO, typename ReturnType>
-struct AsyncIOAwaiter:public async_task_base
-{
-    using return_type = ReturnType;
-
-    AsyncIOAwaiter(AsyncIO<EnumAsyncIO, ReturnType>& info):stragtegy_(info.fd_, info.buf_, info.num_){
-        value_ = return_type{};
-    }
-
-
-
-    bool await_ready() const noexcept { 
-        return false; 
-    }
-
-    void await_suspend(std::coroutine_handle<> h)  {
-        h_ = h;
-        struct epoll_event &event = stragtegy_.fd_.events_;
-        event.data.ptr = this;
-        if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event) == -1) {
-                
-            //TODO(leo) 后续完善异常处理
-            // 如果文件描述符已存在，errno将被设置为EEXIST
-            if (errno == EEXIST) {
-                printf("File descriptor %d already added, modifying.\n", fd);
-                    
-                // 修改已存在的文件描述符的事件
-                if (epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &event) == -1) {
-                    printf("Failed to modify file descriptor %d: %s\n", fd, strerror(errno));
-                }
-            } else {
-                printf("Failed to add file descriptor %d: %s\n", fd, strerror(errno));
-                // 这里需要进行错误处理
-            }
-        }
-
-
-    }
-
-    return_type await_resume() const noexcept { 
-        return value_;
-    }
-
-    //实现接口epoll返回时调用
-    void completed() override{
-        ReturnType result = stragtegy_.complete();
-        value_ = result;
-    }
-
-    void resume() override{
-        // std::cout << "async_task ::  resume ############" << std::endl;
-        h_.resume();
-    }
-
-    std::coroutine_handle<> h_;;
-
-    return_type value_ = return_type();
-    AsyncIOStrategy<EnumAsyncIO>   stragtegy_;
-};
-
-
-template <typename ReturnType>
-struct AsyncIOAwaiter<EnumAsyncIO::EnumAsyncIOClose, ReturnType>:public async_task_base
-{
-    using return_type = ReturnType;
-
-    AsyncIOAwaiter(AsyncIO<EnumAsyncIO, ReturnType>& info):stragtegy_(info.fd_){
-        value_ = return_type{};
-    }
-
-
-
-    bool await_ready() const noexcept { 
-        return false; 
-    }
-
-    void await_suspend(std::coroutine_handle<> h)  {
-        h_ = h;
-        
-        // 是不是要移交给epoll处理呢？
-    }
-
-    return_type await_resume() const noexcept { 
-        return value_;
-    }
-    std::coroutine_handle<> h_;;
-
-    return_type value_ = return_type();
-    AsyncIOStrategy<EnumAsyncIO>   stragtegy_;
-};
-
 
 //返回值默认为int
 // template <  template < enum EnumAsyncIO >  typename IoStrategy = AsyncIOStrategy, typename ReturnType = int>
-template <enum EnumAsyncIO , typename ReturnType = int>
+template <EnumAsyncIO Enum, typename ReturnType = int>
 struct  AsyncIO
-{
-    
+{;
     using return_type = ReturnType;
 
-    AsyncIO(file_descriptor &fd, const void *buf, size_t n):stragtegy_(fd, buf, n){
+    AsyncIO(file_descriptor &fd, void *buf, size_t n):stragtegy_(fd, buf, n){
 
     }
 
-    AsyncIOStrategy<EnumAsyncIO>   stragtegy_;
+    AsyncIOStrategy<Enum>   stragtegy_;
 };
 
 template <typename ReturnType>
 struct  AsyncIO<EnumAsyncIO::EnumAsyncIOClose, ReturnType>
 {
-    
     using return_type = ReturnType;
 
-    AsyncIO(file_descriptor &fd):fd_(fd),stragtegy_(fd){
+    AsyncIO(file_descriptor &fd):stragtegy_(fd){
 
     }
-    file_descriptor fd_;
-    AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOClose>   stragtegy_;
+    // file_descriptor &fd_;
+    AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOClose>  stragtegy_;
 };
 
-// TODO(leo)这个类保存awaiter，添加到epoll监视集合的ptr中，epoll出发后，执行任务
-// template <enum EnumAsyncIO, typename ReturnType>
-// struct async_io_task: public async_task_base{
-//     async_task(AsyncIOAwaiter<EnumAsyncIO, ReturnType> &awaiter)
-//     :owner_(awaiter)
-//     {
 
-//     }
+AsyncIO<EnumAsyncIO::EnumAsyncIOWrite,int> AsyncWrite(file_descriptor &fd, void *buf, size_t n){
+    return  AsyncIO<EnumAsyncIO::EnumAsyncIOWrite,int>(fd, buf, n);
+}
 
-//     void completed() override{
-//         ReturnType result = owner_;
-//         owner_.value_ = result;
-//     }
+AsyncIO<EnumAsyncIO::EnumAsyncIORead,int> AsyncRead(file_descriptor &fd,void *buf, size_t n){
+    return  AsyncIO<EnumAsyncIO::EnumAsyncIORead,int>(fd, buf, n);
+}
 
-//     void resume() override{
-//         // std::cout << "async_task ::  resume ############" << std::endl;
-//         owner_.h_.resume();
-//     }
-//     AsyncAwaiter<ReturnType> &owner_ ;
-//     // std::function< typename ReturnType ()> do_func_;
-// };
+AsyncIO<EnumAsyncIO::EnumAsyncIOClose,int> AsyncClose(file_descriptor &fd){
+    return  AsyncIO<EnumAsyncIO::EnumAsyncIOClose,int>(fd);
+}
 
 
-struct file_descriptor
-{
-    int  fd_ = -1;
-    bool need_remove_from_epoll_ = false;
-    struct epoll_event events_;
-    
-    file_descriptor(int fd){
-        fd_ = fd;
-        bzero(&events_, sizeof(events_));
-        events_.data.fd = fd_;
-    }
+file_descriptor create_fd(const char *path, int mode){
+    int fd = open(path, mode);
+    return file_descriptor(fd);
+}
 
-    int Write(const void *buf, size_t n){
-        // 如果该文件描述符被添加在epoll中，不允许同步写
-        assert(!need_remove_from_epoll_ );
-        return write(fd_, buf, n);
-    }
-
-
-    AsyncIO<EnumAsyncIO::EnumAsyncIOWrite,int> AsyncWrite(const void *buf, size_t n){
-        return  AsyncIO<EnumAsyncIO::EnumAsyncIOWrite,int>(*this, buf, n);
-    }
-
-    AsyncIO<EnumAsyncIO::EnumAsyncIORead,int> AsyncRead(const void *buf, size_t n){
-        return  AsyncIO<EnumAsyncIO::EnumAsyncIORead,int>(*this, buf, n);
-    }
-
-    AsyncIO<EnumAsyncIO::EnumAsyncIOClose,int> AsyncClose(){
-        return  AsyncIO<EnumAsyncIO::EnumAsyncIOClose,int>(*this);
-    }
-    
-    bool has_strategy(){
-
-    }
-};
 
 
 #define  MAX_EPOLL_EVENT_NUM 1024
@@ -643,25 +551,25 @@ public:
 
     // 将await
     // TODO(leo)这里暂时不考虑性能问题
-    template<enum EnumAsyncIO, typename ReturnType>
-    void epoll_add(AsyncIOAwaiter<EnumAsyncIO::EnumAsyncIOClose, ReturnType>& awaiter){
-        if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event) == -1) {
+    // template<enum EnumAsyncIO, typename ReturnType>
+    // void epoll_add(AsyncIOAwaiter<EnumAsyncIO::EnumAsyncIOClose, ReturnType>& awaiter){
+    //     if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &event) == -1) {
                 
-            // 如果文件描述符已存在，errno将被设置为EEXIST
-            if (errno == EEXIST) {
-                printf("File descriptor %d already added, modifying.\n", fd);
-                awaiter.
-                // 修改已存在的文件描述符的事件
-                if (epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &event) == -1) {
-                    printf("Failed to modify file descriptor %d: %s\n", fd, strerror(errno));
-                    // 这里需要进行错误处理
-                }
-            } else {
-                printf("Failed to add file descriptor %d: %s\n", fd, strerror(errno));
-                // 这里需要进行错误处理
-            }
-        }
-    }
+    //         // 如果文件描述符已存在，errno将被设置为EEXIST
+    //         if (errno == EEXIST) {
+    //             printf("File descriptor %d already added, modifying.\n", fd);
+    //             awaiter.
+    //             // 修改已存在的文件描述符的事件
+    //             if (epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, fd, &event) == -1) {
+    //                 printf("Failed to modify file descriptor %d: %s\n", fd, strerror(errno));
+    //                 // 这里需要进行错误处理
+    //             }
+    //         } else {
+    //             printf("Failed to add file descriptor %d: %s\n", fd, strerror(errno));
+    //             // 这里需要进行错误处理
+    //         }
+    //     }
+    // }
 
     void run(){
         struct epoll_event  events[MAX_EPOLL_EVENT_NUM] = {};
@@ -702,8 +610,133 @@ private:
     std::vector<std::function<void ()> > event_list_;
 };
 
+// 使用继承多态 传给epoll避免类型恢复的问题
+template <EnumAsyncIO Enum, typename ReturnType>
+struct AsyncIOAwaiter:public async_task_base
+{
+    // using async_io_awaiter_type = Enum;
+    using return_type = ReturnType;
+
+    AsyncIOAwaiter(AsyncIO<Enum, ReturnType>& info):stragtegy_(info.fd_, info.buf_, info.num_){
+        value_ = return_type{};
+    }
+
+
+
+    bool await_ready() const noexcept { 
+        return false; 
+    }
+
+    // 是不是可以从协程获取eventloop，协程创建使用iocontext
+    void await_suspend(std::coroutine_handle<> h)  {
+        h_ = h;
+        struct epoll_event &event = stragtegy_.fd_.events_;
+        int fd = stragtegy_.fd_;
+        event.data.ptr = this;
+        event_loop &loop =  Singleton<event_loop>::getInstance();
+        if (epoll_ctl(loop.epoll_fd_, EPOLL_CTL_ADD, fd, &event) == -1) {
+                
+            //TODO(leo) 后续完善异常处理
+            // 如果文件描述符已存在，errno将被设置为EEXIST
+            if (errno == EEXIST) {
+                printf("File descriptor %d already added, modifying.\n", fd);
+                    
+                // 修改已存在的文件描述符的事件
+                if (epoll_ctl(loop.epoll_fd_, EPOLL_CTL_MOD, fd, &event) == -1) {
+                    printf("Failed to modify file descriptor %d: %s\n", fd, strerror(errno));
+                }
+            } else {
+                printf("Failed to add file descriptor %d: %s\n", fd, strerror(errno));
+                // 这里需要进行错误处理
+            }
+        }
+
+
+    }
+
+    return_type await_resume() const noexcept { 
+        return value_;
+    }
+
+    //实现接口epoll返回时调用
+    void completed() override{
+        ReturnType result = stragtegy_.complete();
+        value_ = result;
+    }
+
+    void resume() override{
+        // std::cout << "async_task ::  resume ############" << std::endl;
+        h_.resume();
+    }
+
+    std::coroutine_handle<> h_;;
+
+    return_type value_ = return_type();
+    AsyncIOStrategy<Enum>   stragtegy_;
+
+};
+
+
+template <typename ReturnType>
+struct AsyncIOAwaiter<EnumAsyncIO::EnumAsyncIOClose, ReturnType>:public async_task_base
+{
+    // using async_io_awaiter_type = Enum;
+    using return_type = ReturnType;
+
+    AsyncIOAwaiter(AsyncIO<EnumAsyncIO::EnumAsyncIOClose, ReturnType>& info):stragtegy_(info.fd_){
+        value_ = return_type{};
+    }
+
+
+
+    bool await_ready() const noexcept { 
+        return false; 
+    }
+
+    void await_suspend(std::coroutine_handle<> h)  {
+        h_ = h;
+        
+        // 是不是要移交给epoll处理呢？
+    }
+
+    return_type await_resume() const noexcept { 
+        return value_;
+    }
+    std::coroutine_handle<> h_;;
+
+    return_type value_ = return_type();
+    AsyncIOStrategy<EnumAsyncIO::EnumAsyncIOClose>   stragtegy_;
+};
+
+
+
+// TODO(leo)这个类保存awaiter，添加到epoll监视集合的ptr中，epoll出发后，执行任务
+// template <enum EnumAsyncIO, typename ReturnType>
+// struct async_io_task: public async_task_base{
+//     async_task(AsyncIOAwaiter<EnumAsyncIO, ReturnType> &awaiter)
+//     :owner_(awaiter)
+//     {
+
+//     }
+
+//     void completed() override{
+//         ReturnType result = owner_;
+//         owner_.value_ = result;
+//     }
+
+//     void resume() override{
+//         // std::cout << "async_task ::  resume ############" << std::endl;
+//         owner_.h_.resume();
+//     }
+//     AsyncAwaiter<ReturnType> &owner_ ;
+//     // std::function< typename ReturnType ()> do_func_;
+// };
+
+
+
+
 int main(){
-    event_loop loop;
+    event_loop &loop = Singleton<event_loop>::getInstance();
     loop.post(test_func);
     loop.run();
     
