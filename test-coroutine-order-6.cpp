@@ -315,68 +315,6 @@ struct async_task: public async_task_base{
 };
 
 
-CoroutineTask<u_int64_t> second_coroutine(){
-    co_return 3;
-}
-
-template <typename ReturnType>
-AsyncThread<ReturnType> do_slow_work(std::function< ReturnType () > &&func){
-    
-    // 必须使用完美转发
-    return AsyncThread<ReturnType>(std::forward< std::function< ReturnType () > >(func));
-}
-
-
-// 该函数用于验证c++重载
-char do_slow_work(std::function<char () > &&func){
-    
-    // 必须使用完美转发
-    return 'c';
-}
-
-
-CoroutineTask<char> first_coroutine(){
-    auto func =[]() -> uint64_t{
-        std::cout<< "do a slow work !!!!!!!!!!!!!!!!!!!!!" << std::endl;
-        return 1;
-    };    
-    uint64_t result = co_await do_slow_work<uint64_t>(func);
-    // if(result == 1){
-    //     std::cout << " resumed successfully " << std::endl;
-    //     exit(1);
-    // }
-    std::cout << "@@@@@@@@@ result is  : " << result  << std::endl; 
-    co_return 'b';
-}
-
-
-
-void do_work() {
-    while (1)
-    {
-        std::lock_guard<std::mutex> g(m);
-
-        for(auto task : g_work_queue){
-            task->completed();
-            g_raw_work_queue.push_back(task);
-        }
-        g_work_queue.clear();
-    }   
-    
-}
-
-void do_reume(){
-    std::lock_guard<std::mutex> g(m);
-    
-    for(auto &task : g_raw_work_queue){
-        task->resume();
-    }
-    g_raw_work_queue.clear();
-}
-
-void test_func(){
-    first_coroutine();
-}
 
 
 // ========================================================================================================================
@@ -529,7 +467,11 @@ AsyncIO<EnumAsyncIO::EnumAsyncIOClose,int> AsyncClose(file_descriptor &fd){
 
 
 file_descriptor create_fd(const char *path, int mode){
-    int fd = open(path, mode);
+    int fd = open(path, O_CREAT | O_RDWR, mode);
+    if (fd == -1) {
+        perror("open");
+    }
+
     return file_descriptor(fd);
 }
 
@@ -537,12 +479,38 @@ file_descriptor create_fd(const char *path, int mode){
 
 #define  MAX_EPOLL_EVENT_NUM 1024
 
-class event_loop
+void do_work() {
+    while (1)
+    {
+        std::lock_guard<std::mutex> g(m);
+
+        for(auto task : g_work_queue){
+            task->completed();
+            g_raw_work_queue.push_back(task);
+        }
+        g_work_queue.clear();
+    }   
+    
+}
+
+void do_reume(){
+    std::lock_guard<std::mutex> g(m);
+    
+    for(auto &task : g_raw_work_queue){
+        task->resume();
+    }
+    g_raw_work_queue.clear();
+}
+
+
+
+
+struct event_loop
 {
 public:
-    event_loop():work_thread_(do_work),epoll_fd_(-1){
+    event_loop():work_thread_(do_work){
         
-
+        epoll_fd_ = epoll_create(MAX_EPOLL_EVENT_NUM);
     }
 
     void post(std::function<void ()>&& func){
@@ -573,18 +541,21 @@ public:
 
     void run(){
         struct epoll_event  events[MAX_EPOLL_EVENT_NUM] = {};
-        epoll_fd_ = epoll_create(MAX_EPOLL_EVENT_NUM);
 
         while (1)
         {
             // TODO(leo)time out设置
-            int nfds = epoll_wait(epoll_fd_, events, MAX_EPOLL_EVENT_NUM, -1);
+            int nfds = epoll_wait(epoll_fd_, events, MAX_EPOLL_EVENT_NUM, 1);
+
 
             if (nfds == -1) {
                 perror("epoll_wait failed\n");
                 exit(EXIT_FAILURE);
             }
-
+            for(auto & func : event_list_ ){
+                func();
+            }
+            event_list_.clear();
             for (int n = 0; n < nfds; ++n) {
                 struct epoll_event & event = events[n];
                 async_task_base * task_ptr =  static_cast<async_task_base *>(event.data.ptr);
@@ -594,18 +565,17 @@ public:
             }
             do_reume();
 
-            event_list_.clear();
         }
         work_thread_.join();
         getchar();
     }
-private:
+
+    int epoll_fd_;
 
 
 
 private:
     std::thread work_thread_;
-    int epoll_fd_;
 
     std::vector<std::function<void ()> > event_list_;
 };
@@ -617,7 +587,7 @@ struct AsyncIOAwaiter:public async_task_base
     // using async_io_awaiter_type = Enum;
     using return_type = ReturnType;
 
-    AsyncIOAwaiter(AsyncIO<Enum, ReturnType>& info):stragtegy_(info.fd_, info.buf_, info.num_){
+    AsyncIOAwaiter(AsyncIO<Enum, ReturnType>& info):stragtegy_(info.stragtegy_){
         value_ = return_type{};
     }
 
@@ -631,7 +601,7 @@ struct AsyncIOAwaiter:public async_task_base
     void await_suspend(std::coroutine_handle<> h)  {
         h_ = h;
         struct epoll_event &event = stragtegy_.fd_.events_;
-        int fd = stragtegy_.fd_;
+        int fd = stragtegy_.fd_.fd_;
         event.data.ptr = this;
         event_loop &loop =  Singleton<event_loop>::getInstance();
         if (epoll_ctl(loop.epoll_fd_, EPOLL_CTL_ADD, fd, &event) == -1) {
@@ -732,6 +702,48 @@ struct AsyncIOAwaiter<EnumAsyncIO::EnumAsyncIOClose, ReturnType>:public async_ta
 //     // std::function< typename ReturnType ()> do_func_;
 // };
 
+CoroutineTask<u_int64_t> second_coroutine(){
+    co_return 3;
+}
+
+template <typename ReturnType>
+AsyncThread<ReturnType> do_slow_work(std::function< ReturnType () > &&func){
+    
+    // 必须使用完美转发
+    return AsyncThread<ReturnType>(std::forward< std::function< ReturnType () > >(func));
+}
+
+
+// 该函数用于验证c++重载
+char do_slow_work(std::function<char () > &&func){
+    
+    // 必须使用完美转发
+    return 'c';
+}
+
+
+CoroutineTask<char> first_coroutine(){
+    auto func =[]() -> uint64_t{
+        std::cout<< "do a slow work !!!!!!!!!!!!!!!!!!!!!" << std::endl;
+        return 1;
+    };    
+    uint64_t result = co_await do_slow_work<uint64_t>(func);
+    // if(result == 1){
+    //     std::cout << " resumed successfully " << std::endl;
+    //     exit(1);
+    // }
+    
+    std::cout << "@@@@@@@@@ result is  : " << result  << std::endl; 
+    file_descriptor file =  create_fd("./test.file", 777);
+    const char * buf = "hello world\n";
+    int num = co_await AsyncWrite(file, (void *)buf, sizeof(buf));
+    std::cout << "@@@@@@@@@ num is  : " << num  << std::endl; 
+    co_return 'b';
+}
+
+void test_func(){
+    first_coroutine();
+}
 
 
 
