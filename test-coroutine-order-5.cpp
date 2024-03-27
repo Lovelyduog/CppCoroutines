@@ -80,14 +80,20 @@ struct suspend_awaiter
 
 
     void await_suspend(std::coroutine_handle<> h)  {
-        SuspendStrategy do_supend(h);
+        h_ = h;
     }
 
     return_type await_resume() const noexcept { 
         return promise_->get_value();
     }
-    
+    ~suspend_awaiter(){
+        std::cout <<"~suspend_awaiter()" << std::endl;
+        if(h_ != nullptr){
+            h_.resume();
+        }
+    }
     promise_type* promise_;
+    std::coroutine_handle<> h_ = nullptr;
 };
 
 struct final_suspend_controler_awaiter
@@ -187,6 +193,7 @@ struct Promise:promise_base< typename CoTask::return_type>
 
 
     return_type value_;
+    std::coroutine_handle<> h_;
 };
 
 // template<typename T>
@@ -324,9 +331,9 @@ CoroutineTask<char> first_coroutine(){
     uint64_t result = co_await do_slow_work<uint64_t>(func);
     if(result == 1){
         std::cout << " resumed successfully " << std::endl;
-        exit(1);
+        // exit(1);
     }
-    // std::cout << "@@@@@@@@@ result is  : " << result  << std::endl; 
+    std::cout << "@@@@@@@@@ result is  : " << result  << std::endl; 
     // std::cout << "！！！！！ result  is : " << result << std::endl; //这一行不是原子的
     co_return 'b';
 }
