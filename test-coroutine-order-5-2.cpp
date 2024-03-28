@@ -13,14 +13,15 @@ struct async_task_base
 {
     virtual void completed() = 0;
     virtual void resume() = 0;
-    virtual ~async_task_base(){};
+    // virtual ~async_task_base(){};
 };
 
 // TODO(leo)这个可以加上超时机制
 
 
 std::mutex m;
-std::vector<std::shared_ptr<async_task_base>> g_raw_work_queue; //原来的 eventloop队列
+std::vector<async_task_base *> g_event_loop_queue; //原来的 eventloop队列
+std::vector<std::shared_ptr<async_task_base>> g_resume_queue; //原来的 eventloop队列
 std::vector<std::shared_ptr<async_task_base>> g_work_queue; //执行耗时操作线程队列
 
 template <typename ReturnType>
@@ -52,34 +53,35 @@ struct CommonAwaiter:async_task_base
     }
 
     //也可以直接恢复 
-    std::coroutine_handle<> await_suspend(std::coroutine_handle<> h)  {
-        return h;
-    }
+    // std::coroutine_handle<> await_suspend(std::coroutine_handle<> h)  {
+    //     return h;
+    // }
 
     // TODO(leo)下面这种做法，不知道为什么会少一次对final_suspend_controler_awaiter的析构
     // final_suspend_controler_awaiter()
     // ~final_suspend_controler_awaiter()
 
     // // 可以交给eventloop调度 这个有问题，执行完后智能指针被析构会释放资源
-    // void await_suspend(std::coroutine_handle<> h)  {
-    //     std::cout <<"await_suspend()" << std::endl;
-    //     h_ = h;
-    //     std::lock_guard<std::mutex> g(m);
-    //     // g_work_queue.emplace_back(std::shared_ptr<async_task_base>(this));
-    //      g_raw_work_queue.emplace_back(std::shared_ptr<async_task_base>(this));
-    //     // h_.resume();
-    // }
+    void await_suspend(std::coroutine_handle<> h)  {
+        std::cout <<"await_suspend()" << std::endl;
+        h_ = h;
+        // std::lock_guard<std::mutex> g(m);
+        // // g_work_queue.emplace_back(std::shared_ptr<async_task_base>(this));
+        //  g_resume_queue.emplace_back(std::shared_ptr<async_task_base>(this));
+         g_event_loop_queue.emplace_back(this);
+        // h_.resume();
+    }
     // 交给eventloop去调度
     void completed() {
 
     }
     void resume() override{
         std::cout <<"CommonAwaiter::resume()" << std::endl;
-        // if(!h_.done())
-        // {
+        if(!h_.done())
+        {
             std::cout <<"resume()" << std::endl;
             h_.resume();
-        // }
+        }
     }
 
 
@@ -88,8 +90,9 @@ struct CommonAwaiter:async_task_base
     }
 
     // resume后最后一个 promise_->is_initted 为 true的 awaiter才会销毁
+    //~CommonAwaiter 调用是在h_.resume(); 之后的
     ~CommonAwaiter(){
-        // std::cout <<"~CommonAwaiter()  :  status"  << promise_->is_initted() << std::endl;
+        std::cout <<"~CommonAwaiter()  :  status"  << promise_->is_initted() << std::endl;
     }
     promise_type* promise_;
     std::coroutine_handle<> h_ = nullptr;
@@ -142,7 +145,9 @@ struct Promise:promise_base< typename CoTask::return_type>
 {
     using return_type  = typename CoTask::return_type ;
     bool is_initted_ = false;
-
+    ~Promise(){
+       std::cout << "Promise" << std::endl;
+    }
     auto initial_suspend() {
         return CommonAwaiter<CoTask>(this); 
     };
@@ -350,16 +355,16 @@ void do_work() {
 
         std::lock_guard<std::mutex> g(m);
 
-        // std::cout << " g_work_queue size " << g_raw_work_queue.size()   << std::endl;
+        // std::cout << " g_work_queue size " << g_resume_queue.size()   << std::endl;
 
         for(auto task : g_work_queue){
             task->completed();
-            g_raw_work_queue.push_back(task);
+            g_resume_queue.push_back(task);
         }
         
-        // g_raw_work_queue.assign(g_work_queue.begin(), g_work_queue.end());   //！！！！！！！这里有个大坑坑查了好久，如果连续两次先进来这里，会把g_raw_work_queue中的元素给清理掉，导致后面无法恢复
+        // g_resume_queue.assign(g_work_queue.begin(), g_work_queue.end());   //！！！！！！！这里有个大坑坑查了好久，如果连续两次先进来这里，会把g_raw_work_queue中的元素给清理掉，导致后面无法恢复
         g_work_queue.clear();
-        // std::cout << " g_raw_work_queue size " << g_raw_work_queue.size()   << std::endl;
+        // std::cout << " g_resume_queue size " << g_resume_queue.size()   << std::endl;
     }   
     
 }
@@ -371,16 +376,22 @@ void do_reume(){
     {
         std::lock_guard<std::mutex> g(m);
         
-        // for(auto &task : g_raw_work_queue){
+        // for(auto &task : g_resume_queue){
         //     task->resume();
         // }
-        g_raw_work_queue_tmp.swap(g_raw_work_queue);
+        g_raw_work_queue_tmp.swap(g_resume_queue);
     }
+
+    for(auto task : g_event_loop_queue){
+        task->resume();
+    }
+
+    g_event_loop_queue.clear();
 
     for(auto &task : g_raw_work_queue_tmp){
         task->resume();
     }
-    // g_raw_work_queue.clear();
+    // g_resume_queue.clear();
 }
 
 void test_func(){
@@ -398,6 +409,8 @@ int main(){
     // 主线程每秒从处理好的异步任务池中获取协程进行resume
     while (1)
     {
+
+
         do_reume();
         // 每隔1秒取一次完成的异步任务
         // std::this_thread::sleep_for(std::chrono::seconds(1));
