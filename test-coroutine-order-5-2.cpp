@@ -280,7 +280,7 @@ struct AsyncAwaiter
         }
         
         // std::cout << " void await_suspend(std::coroutine_handle<> h)" << std::endl;
-        m.unlock();
+        // m.unlock();
         std::lock_guard<std::mutex> g(m); //这就死锁了？？？
         g_work_queue.emplace_back(std::shared_ptr<async_task_base>( new async_task<uint64_t>(*this)));
     }
@@ -336,8 +336,8 @@ CoroutineTask<char> first_coroutine(){
     // second_coroutine();
     uint64_t result = co_await do_slow_work<uint64_t>(func);
     std::cout << "@@@@@@@@@ result1 is  : " << result  << std::endl; 
-    // uint64_t num =  co_await second_coroutine();
-    // std::cout << "second_coroutine result is  : " << num  << std::endl; 
+    uint64_t num =  co_await second_coroutine();
+    std::cout << "second_coroutine result is  : " << num  << std::endl; 
     // std::cout << "before  co_await do_slow_work " << std::endl; 
     result = co_await do_slow_work<uint64_t>(func);
     std::cout << "@@@@@@@@@ result2 is  : " << result  << std::endl; 
@@ -352,8 +352,8 @@ void do_work() {
     while (1)
     {
         // 加锁
-        std::cout << "void do_work()  "   << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(1)); //！！！！！还有这个加锁要在锁钱前不然，让出cpu后，由于还没有解锁，又会被其他线程再拿到锁，这样就死锁了
+        // std::cout << "void do_work()  "   << std::endl;
+        // std::this_thread::sleep_for(std::chrono::seconds(1)); //！！！！！还有这个加锁要在锁钱前不然，让出cpu后，由于还没有解锁，又会被其他线程再拿到锁，这样就死锁了
 
         std::lock_guard<std::mutex> g(m);
 
@@ -372,14 +372,22 @@ void do_work() {
 }
 
 void do_reume(){
-    std::cout << "void do_reume()" << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(1)); 
-    std::lock_guard<std::mutex> g(m);
-    
-    for(auto &task : g_raw_work_queue){
+    // std::cout << "void do_reume()" << std::endl;
+    std::vector<std::shared_ptr<async_task_base>> g_raw_work_queue_tmp;
+    // std::this_thread::sleep_for(std::chrono::seconds(1)); 
+    {
+        std::lock_guard<std::mutex> g(m);
+        
+        // for(auto &task : g_raw_work_queue){
+        //     task->resume();
+        // }
+        g_raw_work_queue_tmp.swap(g_raw_work_queue);
+    }
+
+    for(auto &task : g_raw_work_queue_tmp){
         task->resume();
     }
-    g_raw_work_queue.clear();
+    // g_raw_work_queue.clear();
 }
 
 void test_func(){
