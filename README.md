@@ -13,3 +13,4 @@ asynwrite
 
 第五个是目前最完整的文件
 5-1 发现了一个死锁问题，reume，添加回原来eventloop队列，会调用await_supend导致死锁
+5-2解决了上面的死锁问题

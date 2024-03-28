@@ -89,7 +89,7 @@ struct CommonAwaiter:async_task_base
 
     // resume后最后一个 promise_->is_initted 为 true的 awaiter才会销毁
     ~CommonAwaiter(){
-        std::cout <<"~CommonAwaiter()  :  status"  << promise_->is_initted() << std::endl;
+        // std::cout <<"~CommonAwaiter()  :  status"  << promise_->is_initted() << std::endl;
     }
     promise_type* promise_;
     std::coroutine_handle<> h_ = nullptr;
@@ -99,16 +99,16 @@ struct CommonAwaiter:async_task_base
 struct final_suspend_controler_awaiter
 {
     final_suspend_controler_awaiter(){
-        std::cout <<"final_suspend_controler_awaiter()" << std::endl;
+        // std::cout <<"final_suspend_controler_awaiter()" << std::endl;
     }
     constexpr bool await_ready() const noexcept { return true; }
 
     void await_suspend(std::coroutine_handle<> h) const noexcept {
-        std::cout <<"+final_suspend_controler_awaiter()" << std::endl;
+        // std::cout <<"+final_suspend_controler_awaiter()" << std::endl;
         // h.destroy();
     }
     ~final_suspend_controler_awaiter(){
-        std::cout <<"~final_suspend_controler_awaiter()" << std::endl;
+        // std::cout <<"~final_suspend_controler_awaiter()" << std::endl;
     }
     constexpr void await_resume() const noexcept {} 
 };
@@ -239,13 +239,13 @@ struct async_task: public async_task_base{
     }
 
     void completed() override{
-        std::cout << "async_task ::  completed ############" << std::endl;
+        // std::cout << "async_task ::  completed ############" << std::endl;
         ReturnType result = owner_.func_();
         owner_.value_ = result;
     }
 
     void resume() override{
-        std::cout << "async_task ::  resume ############" << std::endl;
+        // std::cout << "async_task ::  resume ############" << std::endl;
         owner_.h_.resume();
     }
     AsyncAwaiter<ReturnType> &owner_ ;
@@ -259,7 +259,7 @@ struct AsyncAwaiter
     using return_type = ReturnType;
 
     AsyncAwaiter(AsyncThread<ReturnType>& info){
-        std::cout<< " AsyncAwaiter(AsyncThread<ReturnType>& info)" << std::endl;
+        // std::cout<< " AsyncAwaiter(AsyncThread<ReturnType>& info)" << std::endl;
         value_ = return_type{};
         func_ = info.func_;
     }
@@ -271,22 +271,15 @@ struct AsyncAwaiter
     }
     //类型擦除是协程A中挂起协程B，但擦除类型后,无法从h中恢复出之前类型的promise
     void await_suspend(std::coroutine_handle<> h)  {
-        std::cout<< "AsyncAwaiter::await_suspend" << std::endl;
+        // std::cout<< "AsyncAwaiter::await_suspend" << std::endl;
         h_ = h;
-        if ( h.done())
-        {
-            std::cout<< "AsyncAwaiter::done" << std::endl;
-            // h.resume();
-        }
-        
         // std::cout << " void await_suspend(std::coroutine_handle<> h)" << std::endl;
-        // m.unlock();
         std::lock_guard<std::mutex> g(m); //这就死锁了？？？
         g_work_queue.emplace_back(std::shared_ptr<async_task_base>( new async_task<uint64_t>(*this)));
     }
 
     return_type await_resume() const noexcept { 
-        std::cout<< "AsyncAwaiter::await_resume" << std::endl;
+        // std::cout<< "AsyncAwaiter::await_resume" << std::endl;
         return value_;
     }
 
