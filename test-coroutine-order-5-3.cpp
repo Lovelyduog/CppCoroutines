@@ -64,11 +64,12 @@ struct CommonAwaiter:async_task_base
     // // 可以交给eventloop调度 这个有问题，执行完后智能指针被析构会释放资源
     void await_suspend(std::coroutine_handle<> h)  {
         std::cout <<"await_suspend()" << std::endl;
-        h_ = h;
+        // h_ = h;
+        promise_->h_ = h;
         // std::lock_guard<std::mutex> g(m);
         // // g_work_queue.emplace_back(std::shared_ptr<async_task_base>(this));
         //  g_resume_queue.emplace_back(std::shared_ptr<async_task_base>(this));
-         g_event_loop_queue.emplace_back(this);
+        //  g_event_loop_queue.emplace_back(this);
         // h_.resume();
     }
     // 交给eventloop去调度
@@ -76,11 +77,14 @@ struct CommonAwaiter:async_task_base
 
     }
     void resume() override{
-        std::cout <<"CommonAwaiter::resume()" << std::endl;
-        if(!h_.done())
-        {
-            std::cout <<"resume()" << std::endl;
-            h_.resume();
+        // std::cout <<"CommonAwaiter::resume()" << std::endl;
+        // if(!h_.done())
+        // {
+        //     std::cout <<"resume()" << std::endl;
+        //     h_.resume();
+        // }
+        if (promise_->h_ != nullptr && !promise_->h_.done()){
+            promise_->h_.resume();
         }
     }
 
@@ -92,6 +96,9 @@ struct CommonAwaiter:async_task_base
     // resume后最后一个 promise_->is_initted 为 true的 awaiter才会销毁
     //~CommonAwaiter 调用是在h_.resume(); 之后的
     ~CommonAwaiter(){
+        if (promise_->h_ != nullptr && !promise_->h_.done()){
+            promise_->h_.resume();
+        }
         std::cout <<"~CommonAwaiter()  :  status"  << promise_->is_initted() << std::endl;
     }
     promise_type* promise_;
@@ -147,6 +154,9 @@ struct Promise:promise_base< typename CoTask::return_type>
     bool is_initted_ = false;
     ~Promise(){
        std::cout << "Promise" << std::endl;
+       if (h_ != nullptr && !h_.done()){
+            h_.resume();
+       }
     }
     auto initial_suspend() {
         return CommonAwaiter<CoTask>(this); 
@@ -332,15 +342,15 @@ CoroutineTask<char> first_coroutine(){
         return 1;
     };    
     // second_coroutine();
-    uint64_t result = co_await do_slow_work<uint64_t>(func);
-    std::cout << "@@@@@@@@@ result1 is  : " << result  << std::endl; 
+    // uint64_t result = co_await do_slow_work<uint64_t>(func);
+    // std::cout << "@@@@@@@@@ result1 is  : " << result  << std::endl; 
     uint64_t num =  co_await second_coroutine();
     std::cout << "second_coroutine result is  : " << num  << std::endl; 
-    // std::cout << "before  co_await do_slow_work " << std::endl; 
-    result = co_await do_slow_work<uint64_t>(func);
-    std::cout << "@@@@@@@@@ result2 is  : " << result  << std::endl; 
-    result = co_await do_slow_work<uint64_t>(func);
-    std::cout << "@@@@@@@@@ result3 is  : " << result  << std::endl; 
+    // // std::cout << "before  co_await do_slow_work " << std::endl; 
+    // result = co_await do_slow_work<uint64_t>(func);
+    // std::cout << "@@@@@@@@@ result2 is  : " << result  << std::endl; 
+    // result = co_await do_slow_work<uint64_t>(func);
+    // std::cout << "@@@@@@@@@ result3 is  : " << result  << std::endl; 
     // std::cout << "！！！！！ result  is : " << result << std::endl; //这一行不是原子的
     co_return 'b';
 }
@@ -382,9 +392,9 @@ void do_reume(){
         g_raw_work_queue_tmp.swap(g_resume_queue);
     }
 
-    for(auto task : g_event_loop_queue){
-        task->resume();
-    }
+    // for(auto task : g_event_loop_queue){
+    //     task->resume();
+    // }
 
     g_event_loop_queue.clear();
 
@@ -400,23 +410,23 @@ void test_func(){
 
 int main(){
     test_func();
-    std::thread work_thread(do_work);
-    // work_thread.detach();
+    // std::thread work_thread(do_work);
+    // // work_thread.detach();
 
-    // std::this_thread::sleep_for(std::chrono::seconds(1));
+    // // std::this_thread::sleep_for(std::chrono::seconds(1));
     
-    // 下面这是一个eventloop
-    // 主线程每秒从处理好的异步任务池中获取协程进行resume
-    while (1)
-    {
+    // // 下面这是一个eventloop
+    // // 主线程每秒从处理好的异步任务池中获取协程进行resume
+    // while (1)
+    // {
 
 
-        do_reume();
-        // 每隔1秒取一次完成的异步任务
-        // std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
+    //     do_reume();
+    //     // 每隔1秒取一次完成的异步任务
+    //     // std::this_thread::sleep_for(std::chrono::seconds(1));
+    // }
     
-    work_thread.join();
+    // work_thread.join();
     getchar();
     
 }
