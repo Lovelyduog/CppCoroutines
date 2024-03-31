@@ -88,12 +88,19 @@ using namespace std::chrono_literals;
 
 struct Result {
   struct promise_type {
+    promise_type(){
+      std::cout << "promise_type" << std::endl;
+    }
+
+    ~promise_type(){
+      std::cout << "~promise_type" << std::endl;
+    }
     suspend_never initial_suspend() {
       std::cout << "initial_suspend" << std::endl;
       return {};
     }
 
-    suspend_always final_suspend() noexcept {
+    suspend_never final_suspend() noexcept {
       std::cout << "final_suspend" << std::endl;
       return {};
     }
@@ -103,9 +110,8 @@ struct Result {
 
       return {};
     }
-
     void return_void() {
-
+        std::cout << "return_void" << std::endl;
     }
 
 //    void return_value(int value) {
@@ -128,7 +134,7 @@ struct Awaiter {
 
   void await_suspend(std::coroutine_handle<> coroutine_handle) {
     std::cout << "await_suspend" << std::endl;
-    std::async([=](){
+    std::async(std::launch::async,[=](){
       std::this_thread::sleep_for(2s);
       coroutine_handle.resume();
     });
@@ -144,10 +150,11 @@ Result Coroutine() {
   std::cout << 1 << std::endl;
   std::cout << co_await Awaiter{.value = 1000} << std::endl;
   std::cout << 2 << std::endl;
-//   co_await suspend_always{}; 
-//   std::cout << 3 << std::endl;
+  suspend_always{}; 
+  std::cout << 3 << std::endl;
   co_return;
 };
+
 
 
 int main() {

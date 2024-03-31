@@ -65,7 +65,16 @@
 			"thread": "cpp",
 			"typeinfo": "cpp",
 			"any": "cpp",
-			"variant": "cpp"
+			"variant": "cpp",
+			"codecvt": "cpp",
+			"complex": "cpp",
+			"csignal": "cpp",
+			"cstring": "cpp",
+			"map": "cpp",
+			"source_location": "cpp",
+			"shared_mutex": "cpp",
+			"cinttypes": "cpp",
+			"typeindex": "cpp"
 		}
 	}
 }
