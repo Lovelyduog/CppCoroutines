@@ -13,10 +13,7 @@ struct async_task_base
 {
     virtual void completed() = 0;
     virtual void resume() = 0;
-    // virtual ~async_task_base(){};
 };
-
-// TODO(leo)这个可以加上超时机制
 
 
 std::mutex m;
@@ -187,11 +184,17 @@ struct Promise:promise_base< typename CoTask::return_type>
     }
    
     // TODO(leo)如何确定走哪个await_transform ，如果上面的在下面 有问题
-    template<typename CoTask2>
-    CommonAwaiter<CoTask2> await_transform(CoTask2 &&task){
+    // template<typename CoTask2>
+    // CommonAwaiter<CoTask2> await_transform(CoTask2 &&task){
 
+    //     // std::cout<< "await_transform " << (static_cast<typename CoTask2::promise_type *>(task.p_)->get_value()) << std::endl;
+    //     return CommonAwaiter<CoTask2>(task.p_);
+    // }
+
+    template<typename T>
+    CommonAwaiter<CoroutineTask<T>> await_transform(CoroutineTask<T> &&task){
         // std::cout<< "await_transform " << (static_cast<typename CoTask2::promise_type *>(task.p_)->get_value()) << std::endl;
-        return CommonAwaiter<CoTask2>(task.p_);
+        return CommonAwaiter<CoroutineTask<T>>(task.p_);
     }
     // template<typename T>
     // AsyncAwaiter<T> await_transform(AsyncAwaiter<T> &&awaiter){
@@ -300,11 +303,11 @@ struct AsyncAwaiter
 
 
 
-// template<typename T>
-// inline AsyncAwaiter<T> operator co_await(AsyncThread<T>& info)
-// {
-//     return AsyncAwaiter(info);
-// }
+template<typename T>
+inline AsyncAwaiter<T> operator co_await(AsyncThread<T>& info)
+{
+    return AsyncAwaiter(info);
+}
 
 // uint64_t hard_working()  {
 //     std::cout<< "do a slow work !!!!!!!!!!!!!!!!!!!!!" << std::endl;
