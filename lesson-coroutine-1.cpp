@@ -144,29 +144,6 @@ struct Result {
 };
 
 
-struct Awaiter {
-  int value;
-  bool await_ready() {
-    std::cout << "await_ready" << std::endl;
-    return false;
-  }
-
-  void await_suspend(std::coroutine_handle<> coroutine_handle) {
-    std::cout << "await_suspend" << std::endl;
-    std::async(std::launch::async,[=](){
-      std::this_thread::sleep_for(2s);
-      coroutine_handle.resume();
-    });
-  }
-
-  int await_resume() {
-    std::cout << "await_resume" << std::endl;
-    return value;
-  }
-};
-
-
-
 template <typename ReturnType>
 struct  AsyncThread
 {
@@ -179,17 +156,6 @@ struct  AsyncThread
 };
 
 
-
-class async_task_base;
-
-// template <typename ReturnType>
-// class async_task;
-
-template <typename ReturnType>
-class AsyncThread;
-
-
-// TODO(leo)这个可以加上超时机制
 template <typename ReturnType>
 struct async_task: public async_task_base{
     async_task(AsyncAwaiter<ReturnType> &awaiter)
@@ -199,17 +165,16 @@ struct async_task: public async_task_base{
     }
 
     void completed() override{
-        // std::cout << "async_task ::  completed ############" << std::endl;
+        std::cout << "async_task ::  completed ############" << std::endl;
         ReturnType result = owner_.func_();
         owner_.value_ = result;
     }
 
     void resume() override{
-        // std::cout << "async_task ::  resume ############" << std::endl;
+        std::cout << "async_task ::  resume ############" << std::endl;
         owner_.h_.resume();
     }
     AsyncAwaiter<ReturnType> &owner_ ;
-    // std::function< typename ReturnType ()> do_func_;
 };
 
 
@@ -227,12 +192,12 @@ struct AsyncAwaiter
 
     // 该awaite直接挂起
     bool await_ready() const noexcept { 
-        return flag; 
+        return false; 
     }
-    //类型擦除是协程A中挂起协程B，但擦除类型后,无法从h中恢复出之前类型的promise
+    
     void await_suspend(std::coroutine_handle<> h)  {
         h_ = h;
-        std::lock_guard<std::mutex> g(m); //这就死锁了？？？
+        std::lock_guard<std::mutex> g(m);
         g_work_queue.emplace_back(std::shared_ptr<async_task_base>( new async_task<uint64_t>(*this)));
     }
 
@@ -241,42 +206,42 @@ struct AsyncAwaiter
         return value_;
     }
 
-    
-    bool flag = false;
+  
     std::function<return_type ()> func_;
     std::coroutine_handle<> h_; 
     return_type value_ = return_type();
 };
 
 
-// 模拟耗时操作
-// TODO(leo)AsyncThread返回值根据传入的func返回值获取
-//TODO(leo)试一下alambda从外部传参给do_slow_work
+template<typename T>
+inline AsyncAwaiter<T> operator co_await(AsyncThread<T>&& info)
+{
+    return AsyncAwaiter(info);
+}
+
+
 template <typename ReturnType>
 AsyncThread<ReturnType> do_slow_work(std::function< ReturnType () > &&func){
-    
-    // 必须使用完美转发
     return AsyncThread<ReturnType>(std::forward< std::function< ReturnType () > >(func));
 }
 
 
 Result Coroutine() {
-    auto func =[]() -> uint64_t{
+    int a = 1;
+    auto func =[&]() -> uint64_t{
         // std::cout<< "do a slow work !!!!!!!!!!!!!!!!!!!!!" << std::endl;
-        return 1;
+        return a;
     };    
-    // second_coroutine();
     uint64_t result = co_await do_slow_work<uint64_t>(func);
-    std::cout << "@@@@@@@@@ result1 is  : " << result  << std::endl; 
-    std::cout << "second_coroutine result is  : " << num  << std::endl; 
-    // std::cout << "before  co_await do_slow_work " << std::endl; 
+    std::cout << "@@@@@@@@@ result1 is  : " << result  << std::endl;  
+    a = 2;
     result = co_await do_slow_work<uint64_t>(func);
     std::cout << "@@@@@@@@@ result2 is  : " << result  << std::endl; 
+    a = 3;
     result = co_await do_slow_work<uint64_t>(func);
     std::cout << "@@@@@@@@@ result3 is  : " << result  << std::endl; 
     co_return;
 };
-
 
 
 void do_work() {
@@ -323,7 +288,7 @@ void run_event_loop(){
 }
 
 void test_func(){
-    first_coroutine();
+    Coroutine();
 }
 
 int main(){
