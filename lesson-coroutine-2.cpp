@@ -17,13 +17,14 @@ struct async_task_base
 
 
 std::mutex m;
-std::vector<std::shared_ptr<async_task_base>> g_event_loop_queue; //原来的 eventloop队列
-std::vector<std::shared_ptr<async_task_base>> g_resume_queue; //原来的 eventloop队列
+std::vector<std::shared_ptr<async_task_base>> g_event_loop_queue; 
+
+std::vector<std::shared_ptr<async_task_base>> g_resume_queue; //多线程异步任务完成后后，待主线程恢复的线程
 std::vector<std::shared_ptr<async_task_base>> g_work_queue; //执行耗时操作线程队列
 
 enum class EnumAwaiterType:uint32_t{
-    EnumInitial = 1,
-    EnumSchduling = 2,// 交给eventloop调度
+    EnumInitial = 1, //协程initial
+    EnumSchduling = 2,// 用户co_await
     EnumFinal = 3//销毁
 };
 
@@ -56,15 +57,11 @@ struct coroutine_task: public async_task_base{
     CommonAwaiter<CoTask,AwaiterType> &owner_ ;
 };
 
-
-// 传CoTask的好处是，可以根据协程状态选择awaiter是否挂起协程
-// return_value 只会由co_return触发，所以这个只是对挂起协程使用的awaiter
 template <typename CoTask, EnumAwaiterType AwaiterType = EnumAwaiterType::EnumSchduling>
 struct CommonAwaiter 
 {
     using return_type =  typename CoTask::return_type;
     using promise_type = typename CoTask::promise_type;
-    // 是不是可以把task传递出来，把handle保存在Promise中
     CommonAwaiter(promise_type* promise):promise_(promise){
     }
 
@@ -79,7 +76,7 @@ struct CommonAwaiter
     // }
 
     void await_suspend(std::coroutine_handle<> h)  {
-        std::cout <<"await_suspend()" << std::endl;
+        // std::cout <<"await_suspend()" << std::endl;
         h_ = h;
         g_event_loop_queue.emplace_back(std::shared_ptr<async_task_base>( new coroutine_task<CoTask, AwaiterType>(*this)) );
     }
@@ -154,7 +151,7 @@ struct Promise
 {
     using return_type  = typename CoTask::return_type ;
     ~Promise(){
-       std::cout << "~Promise" << std::endl;
+    //    std::cout << "~Promise" << std::endl;
     }
     CommonAwaiter<CoTask, EnumAwaiterType::EnumInitial> initial_suspend() {
         return {}; 
@@ -164,16 +161,17 @@ struct Promise
         return {}; 
     }
 
-    // 如果有些异常未被协程捕获，可以在这集中进行日志输出，从而避免异常信息的丢失
+    // 提供了一种对协程中未捕获的异常的再处理，比如将异常保存下来，实现协程如以下形式 ： coroutine().get().catch()
+    // 这里我们的实现形式决定了，这里直接再次抛出异常就好
     void unhandled_exception(){
-        try {
-            std::rethrow_exception(std::current_exception());
-        } catch (const std::exception& e) {
-            // 输出异常信息
-            std::cerr << "Unhandled exception caught in CustomAsyncTask: " << e.what() << std::endl;
-        } catch (...) {
-            std::cerr << "Unhandled unknown exception caught in CustomAsyncTask!" << std::endl;
-        }
+        // try {
+        std::rethrow_exception(std::current_exception());
+        // } catch (const std::exception& e) {
+        //     // 输出异常信息
+        //     std::cerr << "Unhandled exception caught in CustomAsyncTask: " << e.what() << std::endl;
+        // } catch (...) {
+        //     std::cerr << "Unhandled unknown exception caught in CustomAsyncTask!" << std::endl;
+        // }
     }
 
     CoTask get_return_object(){ 
@@ -192,19 +190,15 @@ struct Promise
     // 该代码写在Promise中的好处是，可以方便阅读代码很容易就能回想出协程最多会返回三个等待体
     template<typename T>
     CommonAwaiter<CoroutineTask<T>> await_transform(CoroutineTask<T> &&task){
-        // std::cout<< "await_transform " << (static_cast<typename CoTask2::promise_type *>(task.p_)->get_value()) << std::endl;
         return CommonAwaiter<CoroutineTask<T>>(task.p_);
     }
 
-    // template<typename CoTaskOther>
-    // CommonAwaiter<CoTask> await_transform(CoTaskOther &&task){
+    CoTask await_transform(CoTask &&task){
+        return CommonAwaiter<CoTask>(task.p_);
+    }
 
-    //     // std::cout<< "await_transform " << (static_cast<typename CoTask2::promise_type *>(task.p_)->get_value()) << std::endl;
-    //     return CommonAwaiter<CoTaskOther>(task.p_);
-    // }
 
     return_type value_;
-    std::coroutine_handle<> h_;
 };
 
 template <typename ReturnType>
@@ -273,7 +267,8 @@ void run_event_loop(){
             std::lock_guard<std::mutex> g(m);
             g_raw_work_queue_tmp.swap(g_resume_queue);
         }
-
+        
+        // 优先恢复耗时任务
         for(auto &task : g_raw_work_queue_tmp){
             task->resume();
         }
