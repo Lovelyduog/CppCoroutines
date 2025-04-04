@@ -45,6 +45,8 @@ struct CommonAwaiter:async_task_base
     }
 
     // 当时initial_suspend返回的awaiter时，挂起，直接resume
+    // 可以优化，CommonAwaiter加一个模板参数，作为返回值，区分是initail_suspend 返回的awaiter 还是final_suspend返回的awaiter，或者是co_awaiter协程返回的awaiter
+    // 这样我们一个awaiter就可以 做到 对三种不同场景下的awaiter。不同流程的代码统一
     bool await_ready() const noexcept { 
         // return !promise_->is_initted();
         return true;
@@ -191,6 +193,7 @@ struct Promise:promise_base< typename CoTask::return_type>
     //     return CommonAwaiter<CoTask2>(task.p_);
     // }
 
+    // 这里的CoroutineTask是外层的,不是当前promise_type的coroutinetask
     template<typename T>
     CommonAwaiter<CoroutineTask<T>> await_transform(CoroutineTask<T> &&task){
         // std::cout<< "await_transform " << (static_cast<typename CoTask2::promise_type *>(task.p_)->get_value()) << std::endl;
@@ -326,6 +329,12 @@ AsyncThread<ReturnType> do_slow_work(std::function< ReturnType () > &&func){
 
 
 CoroutineTask<u_int64_t> second_coroutine(){
+    auto func =[]() -> uint64_t{
+        // std::cout<< "do a slow work !!!!!!!!!!!!!!!!!!!!!" << std::endl;
+        return 99;
+    };   
+    // 如果这里也有co_await是不是就出错了？
+    uint64_t result = co_await do_slow_work<uint64_t>(func);
     co_return 3;
 }
 

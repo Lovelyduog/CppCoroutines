@@ -25,3 +25,6 @@ TODO(leo)
 后面向办法共用一个resume队列(即让resume队列成为eventloop队列)
 使用条件变量，当do_resume消费完了，通知await_suspend中的以及do_resume中的添加消费者到resume队列中？好像现在用互斥锁一样不会出现死锁，可以添加到同一个队列中，切记resume不能在锁未打开之前reume
 去掉final awaiter
+
+
+目前 7 是最佳实践
