@@ -15,6 +15,7 @@ struct async_task_base
 };
 
 
+
 std::mutex m;
 std::vector<std::shared_ptr<async_task_base>> g_event_loop_queue; 
 std::vector<std::shared_ptr<async_task_base>> g_resume_queue; //多线程异步任务完成后后，待主线程恢复的线程
@@ -59,6 +60,7 @@ struct async_task: public async_task_base{
 
    void completed() override{
        ReturnType result = owner_.func_();
+        // std::cout << "async_task::completed " << "val == "  << result <<   std::endl;
        owner_.value_ = result;
    }
 
@@ -75,7 +77,7 @@ struct AsyncAwaiter
    using return_type = ReturnType;
 
    AsyncAwaiter(AsyncThread<ReturnType>& info){
-       // std::cout<< " AsyncAwaiter(AsyncThread<ReturnType>& info)" << std::endl;
+    //    std::cout<< " AsyncAwaiter(AsyncThread<ReturnType>& info)" << std::endl;
        value_ = return_type{};
        func_ = info.func_;
    }
@@ -83,21 +85,23 @@ struct AsyncAwaiter
    bool await_ready() const noexcept { 
        return false; 
    }
-   
-   void await_suspend(std::coroutine_handle<> h)  {
+   template<typename Promise>
+   void await_suspend(std::coroutine_handle<Promise> h)  {
        h_ = h;
+    //    std::cout << "!!!AsyncAwaiter  await_suspend !!!" << (int64_t)&h.promise()  <<std::endl;
        std::lock_guard<std::mutex> g(m);
        g_work_queue.emplace_back(std::shared_ptr<async_task_base>( new async_task<uint64_t>(*this)));
    }
 
    return_type await_resume() const noexcept { 
+        std::cout << "AsyncAwaiter  await_resume" <<std::endl;
        return value_;
    }
 
  
    std::function<return_type ()> func_;
    std::coroutine_handle<> h_; 
-   return_type value_ = return_type();
+   return_type value_ ;
 };
 
 
@@ -117,9 +121,15 @@ struct coroutine_task: public async_task_base{
         // final_suspend挂起方便统一代码逻辑判断
 
        if(owner_.h_.done()){
-            std::cout << "@@@@@@@@  owner_.h_.done()" << std::endl;
+            // std::cout << "@@@@@@@@  owner_.h_.done()" << std::endl;
+        //    if (/* condition */)
+        //    {
+        //     /* code */
+        //    }
+           
            owner_.h_.destroy();
        }else{
+          std::cout << "@@@@@@@@  ！owner_.h_.done()" << std::endl;
            owner_.h_.resume();
        }
 
@@ -140,15 +150,44 @@ struct CommonAwaiter
    }
 
 
-    //协程co_await    协程，这里有点浪费调度
-   void await_suspend(std::coroutine_handle<> h)  {
+//     //协程co_await    协程，这里有点浪费调度 这是修改前的
+//    void await_suspend(std::coroutine_handle<> h)  {
+//        h_ = h;
+//        这交给event_loop?显然不合适，挂起父亲协程，如果子协程中有co_await导致还没执行完，父亲协程会比子协程先恢复，导致结果错误。那应该怎么恢复？应该让父协程在子协程销毁的时候恢复
+//        g_event_loop_queue.emplace_back(std::shared_ptr<async_task_base>( new coroutine_task<CoTask, AwaiterType>(*this)) );
+//        return ;
+//    }
+
+   template <class PromiseType>
+   void await_suspend(std::coroutine_handle<PromiseType> h)  {
+    //    auto hanle = std::coroutine_handle<promise_type>::from_promise(*promise_);
+        // _h
        h_ = h;
-       g_event_loop_queue.emplace_back(std::shared_ptr<async_task_base>( new coroutine_task<CoTask, AwaiterType>(*this)) );
-       return ;
+    //    std::cout << "!!!await_suspend Promise : " << (int64_t)&h.promise() << std::endl;
+    //    std::cout << "!!!await_suspend Promise : " << (int64_t)promise_ << std::endl;
+       auto suspend_promise = h.promise();
+       auto awaiter_promise2 = promise_;
+
+       auto awaiter_promise = h.promise();
+       int a =  awaiter_promise.get_value();
+    //    std::cout << "!!!AsyncAwaiter  awaiter_promise.get_value() : " << a <<std::endl;
+    //    std::cout << "!!!AsyncAwaiter  await_suspend1 : " << (int64_t)&h.promise()  <<std::endl;
+    //    std::cout << "!!!AsyncAwaiter  await_suspend2 : " << (int64_t)promise_  <<std::endl;
+
+
+       promise_->set_parent_coroutine_handle(h);
+    //    return  std::coroutine_handle<promise_type>::from_promise(*promise_);
+        return;
    }
+
+
+
+
 
 // return ture 和 void效果是一样的
 //    bool await_suspend(std::coroutine_handle<> h)  {
+//        h_ = h;
+//        g_event_loop_queue.emplace_back(std::shared_ptr<async_task_base>( new coroutine_task<CoTask, AwaiterType>(*this)) );
 //        return true; 
 //    }
 
@@ -176,13 +215,11 @@ struct CommonAwaiter
 //        return  std::coroutine_handle<promise_type>::from_promise(*promise_);
 //    }
 
-//    template <class PromiseType>
-//    auto await_suspend(std::coroutine_handle<PromiseType> h)  {
-//        auto hanle = std::coroutine_handle<promise_type>::from_promise(*promise_);
-//        return  std::coroutine_handle<promise_type>::from_promise(*promise_);
-//    }
 
    return_type await_resume() const noexcept { 
+        // std::cout  << " EnumAwaiterType::EnumSchduling>   await_resume" <<std::endl;
+
+        // h_.resume();
        return promise_->get_value();
    }
 
@@ -228,7 +265,7 @@ struct CommonAwaiter <CoTask, EnumAwaiterType::EnumFinal>
    }
 
    void await_suspend(std::coroutine_handle<> h)  noexcept{
-    std::cout << "@@@@@ !!!!!!!!!!!2313" << std::endl;
+    // std::cout << "@@@@@ !!!!!!!!!!!2313" << std::endl;
        h_ = h;
     //    g_resume_queue.push_back(std::shared_ptr<async_task_base>( new coroutine_task<CoTask, EnumAwaiterType::EnumFinal>(*this)));
        g_event_loop_queue.emplace_back(std::shared_ptr<async_task_base>( new coroutine_task<CoTask, EnumAwaiterType::EnumFinal>(*this)));
@@ -236,7 +273,7 @@ struct CommonAwaiter <CoTask, EnumAwaiterType::EnumFinal>
 
     // 只有调用resume才会到这。在外层不能resume所以不会走到到这里，destroy在外层执行
    void await_resume()  noexcept{ 
-        // std::cout << "@@@@@ !!!!!!!!!!!" << std::endl;
+        std::cout << "@@@@@ !!!!!!!!!!!" << std::endl;
         // h_.destroy(); 不能这样使用
    }
 
@@ -249,9 +286,14 @@ struct Promise
 {
    using return_type  = typename CoTask::return_type ;
    ~Promise(){
-       std::cout << " ~Promise()" << std::endl;
+    //    std::cout << " ~Promise()" << std::endl;
+        if(has_parent_coroutine())
+        {
+            parent_.resume();
+        }
    }
    CommonAwaiter<CoTask, EnumAwaiterType::EnumInitial> initial_suspend() {
+        std::cout << "Promise  " <<  (int64_t)this << std::endl;
        return {}; 
    };
    
@@ -275,6 +317,16 @@ struct Promise
    void return_value(return_type value){
        value_ = value;
    }
+
+   void set_parent_coroutine_handle(std::coroutine_handle<> h)
+   {
+        parent_ = h;
+   }
+
+   bool has_parent_coroutine()
+   {
+        return parent_ != nullptr;
+   }
   
    template<typename T>
    CommonAwaiter<CoroutineTask<T>> await_transform(CoroutineTask<T> &&task){
@@ -288,8 +340,8 @@ struct Promise
        return AsyncAwaiter(info);
    }
 
-
-
+ //    std::coroutine_handle<> parent_ = nullptr;
+    std::coroutine_handle<> parent_;
    return_type value_;
 };
 
@@ -365,6 +417,7 @@ AsyncThread<ReturnType> do_slow_work(std::function< ReturnType () > &&func){
 
 
 CoroutineTask<u_int64_t> second_coroutine(){
+    //  std::cout << "CoroutineTask<u_int64_t> second_coroutine "   << std::endl;  
    auto func =[]() -> u_int64_t{
        // std::cout<< "do a slow work !!!!!!!!!!!!!!!!!!!!!" << std::endl;
        return 99;
@@ -393,7 +446,7 @@ CoroutineTask<char> first_coroutine(){
    uint64_t num =  co_await second_coroutine();
    std::cout << "@@@@@@@@@ second_coroutine result is  : " << num  << std::endl; 
    a = 3;
-   result = co_await do_slow_work<uint64_t>(func);
+result = co_await do_slow_work<uint64_t>(func);
    std::cout << "@@@@@@@@@ result3 is  : " << result  << std::endl;  
    float num2 =  co_await third_coroutine();
    a = 4;
@@ -401,6 +454,8 @@ CoroutineTask<char> first_coroutine(){
    std::cout << "@@@@@@@@@ third_coroutine result is  : " << num2  << std::endl; 
    result = co_await do_slow_work<uint64_t>(func);
    std::cout << "@@@@@@@@@ result4 is  : " << result  << std::endl;  
+
+   std::cout << "@@@@  end!!!!!!!"   << std::endl;  
    co_return 'b';
 }
 
@@ -422,7 +477,9 @@ CoroutineTask<char> Coroutine(){
 
 void test_func(){
 //    Coroutine();
-   first_coroutine();
+   first_coroutine();   
+    //下面最快执行到    
+    std::cout << "@@@@  end!!!!!!!end"   << std::endl;  
 }
 
 int main(){

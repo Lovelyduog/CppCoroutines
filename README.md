@@ -28,3 +28,10 @@ TODO(leo)
 
 
 目前 7 是最佳实践
+明天尝试下一层一层吧挂起点传下去，每次resume时 ，如果promise有parent则resume下parent的
+实现了 父协程中co_await 子协程。方案是 ，再子协程的promise中存父协程
+
+
+未来
+未来
+awaiter 分三类  io （加上超时机制） ，其他线程任务await， 以及协程await 
