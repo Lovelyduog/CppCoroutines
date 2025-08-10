@@ -9,109 +9,26 @@
 using namespace std::chrono_literals;
 
 
- struct suspend_always
-  {
-     bool await_ready() const noexcept { 
-      try
-      {
-        std::cout << "suspend_always::await_ready" << std::endl;
-      }
-      catch(const std::exception& e)
-      {
-        std::cerr << e.what() << '\n';
-      }
-      return false; 
-    }
-
-     void await_suspend(std::coroutine_handle<> handle) const noexcept {
-      try
-      {
-        std::cout << "suspend_always::await_suspend" << std::endl;
-      }
-      catch(const std::exception& e)
-      {
-        std::cerr << e.what() << '\n';
-      }
-      
-    }
-
-     void await_resume() const noexcept {
-      try
-      {
-        std::cout << "suspend_always::await_resume" << std::endl;
-      }
-      catch(const std::exception& e)
-      {
-        std::cerr << e.what() << '\n';
-      }
-    }
-  };
-
- struct suspend_never
-  {
-     bool await_ready() const noexcept { 
-      try
-      {
-        std::cout << "suspend_never::await_ready" << std::endl;
-      }
-      catch(const std::exception& e)
-      {
-        std::cerr << e.what() << '\n';
-      }
-      return true; 
-    }
-
-     void await_suspend(std::coroutine_handle<> handle) const noexcept {
-      try
-      {
-        std::cout << "suspend_never::await_suspend" << std::endl;
-      }
-      catch(const std::exception& e)
-      {
-        std::cerr << e.what() << '\n';
-      }
-      
-    }
-
-     void await_resume() const noexcept {
-      try
-      {
-        std::cout << "suspend_never::await_resume" << std::endl;
-      }
-      catch(const std::exception& e)
-      {
-        std::cerr << e.what() << '\n';
-      }
-    }
-  };
-
 
 struct Result {
   struct promise_type {
     promise_type(){
-      std::cout << "promise_type" << std::endl;
     }
 
     ~promise_type(){
-      std::cout << "~promise_type" << std::endl;
     }
-    suspend_never initial_suspend() {
-      std::cout << "initial_suspend" << std::endl;
+    std::suspend_never initial_suspend() {
       return {};
     }
 
-    suspend_never final_suspend() noexcept {
-      std::cout << "final_suspend" << std::endl;
+    std::suspend_never final_suspend() noexcept {
       return {};
     }
 
     Result get_return_object() {
-      std::cout << "get_return_object" << std::endl;
-
       return {};
     }
     void return_void() {
-        std::cout << "return_void" << std::endl;
     }
 
 //    void return_value(int value) {
@@ -121,44 +38,63 @@ struct Result {
     void unhandled_exception() {
 
     }
+
+    // 测试内存占用大小
+    // int a[1000] ={};
+    // int b = 0;
   };
 };
 
+void func(std::coroutine_handle<> coroutine_handle)
+{
+  coroutine_handle.resume();
+  // coroutine_handle.destroy();
+}
 
 struct Awaiter {
   int value;
   bool await_ready() {
-    std::cout << "await_ready" << std::endl;
     return false;
   }
 
+
   void await_suspend(std::coroutine_handle<> coroutine_handle) {
-    std::cout << "await_suspend" << std::endl;
-    std::async(std::launch::async,[=](){
-      std::this_thread::sleep_for(2s);
-      coroutine_handle.resume();
-    });
+    // std::async(std::launch::async,[=](){
+    //   std::this_thread::sleep_for(2s);
+    //   coroutine_handle.resume();
+    // });
+    // coroutine_handle.resume();
+    func(coroutine_handle);
   }
 
   int await_resume() {
-    std::cout << "await_resume" << std::endl;
     return value;
   }
 };
 
 Result Coroutine() {
-  std::cout << 1 << std::endl;
-  std::cout << co_await Awaiter{.value = 1000} << std::endl;
-  std::cout << 2 << std::endl;
-  suspend_always{}; 
-  std::cout << 3 << std::endl;
+  int b = 22;
+  (void)b;
+  co_await Awaiter{.value = 1000};
+  // co_await std::suspend_always{};
+  int a  = 22;
+  (void)a;
   co_return;
 };
 
-
+Result test() {
+  int b = 11;
+  (void)11;
+  co_await Awaiter{.value = 1000};
+  // co_await std::suspend_always{};
+  int a  = 33;
+  (void)a;
+  co_return;
+};
 
 int main() {
   Coroutine();
+  test();
   getchar();
   return 0;
 }

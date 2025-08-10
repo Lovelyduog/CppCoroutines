@@ -18,7 +18,7 @@ struct async_task_base
 
 std::mutex m;
 std::vector<std::shared_ptr<async_task_base>> g_event_loop_queue; 
-std::vector<std::shared_ptr<async_task_base>> g_resume_queue; //多线程异步任务完成后后，待主线程恢复的线程
+// std::vector<std::shared_ptr<async_task_base>> g_resume_queue; //多线程异步任务完成后后，待主线程恢复的线程
 std::vector<std::shared_ptr<async_task_base>> g_work_queue; //执行耗时操作线程队列
 
 enum class EnumAwaiterType:uint32_t{
@@ -37,7 +37,7 @@ struct CommonAwaiter ;
 template <typename>
 struct AsyncAwaiter;
 
-
+// 这个其实没有必要，直接用await就可以了
 template <typename ReturnType>
 struct  AsyncThread
 {
@@ -268,10 +268,12 @@ struct CommonAwaiter <CoTask, EnumAwaiterType::EnumFinal>
     // std::cout << "@@@@@ !!!!!!!!!!!2313" << std::endl;
        h_ = h;
     //    g_resume_queue.push_back(std::shared_ptr<async_task_base>( new coroutine_task<CoTask, EnumAwaiterType::EnumFinal>(*this)));
+        //TODO(shenglish)  如果不希望，占用主线程资源可以 移交给其他线程做销毁工作
        g_event_loop_queue.emplace_back(std::shared_ptr<async_task_base>( new coroutine_task<CoTask, EnumAwaiterType::EnumFinal>(*this)));
    }
 
-    // 只有调用resume才会到这。在外层不能resume所以不会走到到这里，destroy在外层执行
+   // 这里设计是 不会走到final的resume逻辑的
+   // 只有调用resume才会到这。在外层不能resume所以不会走到到这里，destroy在外层执行
    void await_resume()  noexcept{ 
         std::cout << "@@@@@ !!!!!!!!!!!" << std::endl;
         // h_.destroy(); 不能这样使用
@@ -328,6 +330,8 @@ struct Promise
         return parent_ != nullptr;
    }
   
+
+    //   提出去好，严格来说不属于某个协程类
    template<typename T>
    CommonAwaiter<CoroutineTask<T>> await_transform(CoroutineTask<T> &&task){
        return CommonAwaiter<CoroutineTask<T>>(task.p_);
@@ -372,7 +376,7 @@ void do_work() {
        std::lock_guard<std::mutex> g(m);
        for(auto task : g_work_queue){
            task->completed();
-           g_resume_queue.push_back(task);
+           g_event_loop_queue.push_back(task);
        }
        
        g_work_queue.clear();
@@ -390,13 +394,13 @@ void run_event_loop(){
            std::lock_guard<std::mutex> g(m);
            g_event_loop_queue_temp.swap(g_event_loop_queue);
         //    std::lock_guard<std::mutex> g(m);
-           g_raw_work_queue_tmp.swap(g_resume_queue);
+        //    g_raw_work_queue_tmp.swap(g_resume_queue);
        }
        
-       for(auto &task : g_raw_work_queue_tmp){
-           task->resume();
-       }
-
+    //    for(auto &task : g_raw_work_queue_tmp){
+    //        task->resume();
+    //    }
+    
        for(auto& task : g_event_loop_queue_temp){
            task->resume();
        }
@@ -446,7 +450,7 @@ CoroutineTask<char> first_coroutine(){
    uint64_t num =  co_await second_coroutine();
    std::cout << "@@@@@@@@@ second_coroutine result is  : " << num  << std::endl; 
    a = 3;
-result = co_await do_slow_work<uint64_t>(func);
+   result = co_await do_slow_work<uint64_t>(func);
    std::cout << "@@@@@@@@@ result3 is  : " << result  << std::endl;  
    float num2 =  co_await third_coroutine();
    a = 4;
