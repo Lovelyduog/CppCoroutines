@@ -9,6 +9,7 @@
 3. **thirdparty 暂不设计**：只留空目录，引入机制等真有需求时再定（候选：FetchContent 为主 + 本目录作缓存/vendor）。依赖 boost 的学习程序在第三方就绪前排除出构建。
 4. **构建入口**：CMakePresets.json（debug/release）为主，`tools/` 放薄脚本（build/run/format）做补充。
 5. **每个学习 .cpp 一个可执行文件**，沿用原仓库习惯，便于单独运行验证。
+6. **单元测试 = Catch2 v3**（2026-09-10 补充）：`tests/` 目录、FetchContent 引入、ctest 驱动，另有 asan 预设跑 ASan/UBSan；`study/test` 是学习实验，与单元测试严格区分。协程测试三纪律：事件循环可步进、时间可注入、不起真线程。
 
 ## 迁移映射
 
@@ -28,5 +29,4 @@
 ## 后续待定
 
 - 协程库的名称与命名空间（`include/` 下层目录名）
-- 库测试框架与目录（GTest/Catch2，经 thirdparty 引入）
-- thirdparty 引入机制细化（ADR 待定）
+- thirdparty 引入机制细化（ADR 待定；测试框架已先行以 FetchContent 方式引入 Catch2，作为该机制的首个实例）

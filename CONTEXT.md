@@ -15,4 +15,6 @@
 
 ## 其他
 
+- **单元测试**：`tests/` 下针对协程库的自动化测试（Catch2 v3 + ctest），必须确定性——事件循环可步进、时间可注入、不起真线程；与「test（学习实验）」严格区分。
+- **asan 预设**：带 AddressSanitizer/UBSan 的测试构建（`tools/test.sh asan`），用于抓协程 handle 悬垂/泄漏类问题。
 - **NOTES**：项目所有者的学习笔记与结论（`docs/NOTES.md`），持续追加。
