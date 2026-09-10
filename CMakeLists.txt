@@ -1,21 +1,40 @@
-cmake_minimum_required(VERSION 3.18)
-project(CppCoroutines)
+cmake_minimum_required(VERSION 3.20)
+project(CppCoroutines LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-# 查询系统中的boost库
-# link_directories(${PROJECT_SOURCE_DIR}/external/3rd/lib)
-# link_directories(${PROJECT_SOURCE_DIR}/external/lib)
-include_directories(/home/huangruiguo/workspace/project_zero/server/external/include)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug)
+endif()
 
-# list all c files in current dir recursively.
-file(GLOB files "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
-foreach(file ${files})
-    get_filename_component(name ${file} NAME)
-    add_executable(${name} ${file})
-    target_link_libraries(${name} PRIVATE pthread)
-    # target_link_libraries(${name} Boost::boost)
-    link_directories(/home/huangruiguo/workspace/project_zero/server/external/3rd/lib)
-    link_directories(/home/huangruiguo/workspace/project_zero/server/external/lib)
+find_package(Threads REQUIRED)
+
+# 未来协程库的公开头文件；库名与命名空间定下后在此扩充
+add_library(cppcoroutines INTERFACE)
+target_include_directories(cppcoroutines INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# 依赖 boost 的学习程序，等 thirdparty 引入 boost（或改用 standalone asio）后再编译
+set(CC_SKIPPED_SOURCES
+    test-boost-await.cpp
+    test-boost-client.cpp
+    test-boost-server.cpp
+    test-coroutine-order.cpp
+)
+
+# study 下的每个 .cpp 编译为同名可执行文件，便于单独运行学习
+foreach(dir lesson test)
+    file(GLOB CC_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/study/${dir}/*.cpp)
+    foreach(file ${CC_SOURCES})
+        get_filename_component(name ${file} NAME)
+        if(name IN_LIST CC_SKIPPED_SOURCES)
+            message(STATUS "skip (boost not available): study/${dir}/${name}")
+            continue()
+        endif()
+        get_filename_component(target ${file} NAME_WE)
+        add_executable(${target} ${file})
+        target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/study/common)
+        target_link_libraries(${target} PRIVATE cppcoroutines Threads::Threads)
+    endforeach()
 endforeach()

@@ -1,4 +1,12 @@
-cmake-build*
-*.iml
-.idea
+# 构建产物
 build/
+cmake-build*
+a.out
+*.o
+compile_commands.json
+
+# IDE 个人状态
+.vscode/
+.idea
+*.iml
+.cache/
